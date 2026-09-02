@@ -24,3 +24,7 @@ Thumbs.db
 *.lox.out
 /scratch/
 .lox_history
+
+# Added by cargo
+
+/target
