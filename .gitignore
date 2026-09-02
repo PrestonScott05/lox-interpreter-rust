@@ -1,0 +1,26 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# Cargo
+Cargo.lock          # keep this line only if the crate is a library; delete for a binary/application
+
+# Backtrace / debug output
+*.pdb
+
+# Editor / IDE
+/.idea/
+/.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Lox-specific: scratch scripts, REPL history, test output
+*.lox.out
+/scratch/
+.lox_history
