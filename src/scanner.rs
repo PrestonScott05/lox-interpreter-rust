@@ -244,3 +244,36 @@ impl Scanner {
     }
     
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scans_single_char_operators() {
+        let mut scanner = Scanner::new("+ - *".to_string());
+        let tokens = scanner.scan_tokens();
+
+        assert_eq!(tokens[0].token_type, TokenType::Plus);
+        assert_eq!(tokens[1].token_type, TokenType::Minus);
+        assert_eq!(tokens[2].token_type, TokenType::Star);
+        assert_eq!(tokens[3].token_type, TokenType::Eof);
+    }
+
+    #[test] 
+    fn scans_number_with_value() {
+        let mut scanner = Scanner::new("12.5".to_string());
+        let tokens = scanner.scan_tokens();
+
+        assert_eq!(tokens[0].token_type, TokenType::Number);
+        assert_eq!(tokens[0].literal, Some(Literal::Number(12.5)));
+    }
+
+    #[test]
+    fn reports_unterminated_string() {
+        let mut scanner = Scanner::new("\"abc".to_string());
+        scanner.scan_tokens();
+
+        assert!(!scanner.errors().is_empty());
+    }
+}
