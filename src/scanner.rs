@@ -31,6 +31,10 @@ impl Scanner {
         }
     }
 
+    pub fn errors(&self) -> &[ScanError] {
+        &self.errors
+    }
+
     fn is_at_end(&self) -> bool {
         self.current >= self.source.len()
     }
