@@ -1,6 +1,47 @@
 mod token;
 mod token_type;
 mod scanner;
+
+use std::env;
+use std::fs;
+use std::process;
+
+use scanner::Scanner;
+
 fn main() {
-    println!("Hello world");
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() > 2 {
+        println!("Usage: lox [script]");
+        process::exit(64);
+    } else if args.len() == 2 {
+        run_file(&args[1]);
+    } else {
+        println!("usage: lox [script]");
+        process::exit(64);
+    }
+}
+
+fn run_file(path: &str) {
+    let source = fs::read_to_string(path).expect("couldn't read the file");
+    let had_error = run(source);
+    if had_error {
+        process::exit(65);
+    }
+}
+
+fn run(source: String) -> bool {
+    let mut scanner = Scanner::new(source);
+    let tokens = scanner.scan_tokens();
+
+    for token in tokens {
+        println!("{}", token);
+    }
+
+    let errors = scanner.errors();
+    for err in errors {
+        eprintln!("[line {}] Error: {}", err.line, err.message);
+    }
+
+    !errors.is_empty()
 }
