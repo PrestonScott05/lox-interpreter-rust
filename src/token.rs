@@ -1,7 +1,7 @@
 use crate::token_type::TokenType;
 use std::fmt;
 //add traits
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Number(f64),
     Str(String),
