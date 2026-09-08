@@ -2,8 +2,7 @@
 /target/
 **/*.rs.bk
 
-# Cargo
-Cargo.lock          # keep this line only if the crate is a library; delete for a binary/application
+        # keep this line only if the crate is a library; delete for a binary/application
 
 # Backtrace / debug output
 *.pdb
