@@ -5,6 +5,7 @@ mod scanner;
 use std::env;
 use std::fs;
 use std::process;
+use std::io::{self, Write, BufRead};
 
 use scanner::Scanner;
 
@@ -17,8 +18,7 @@ fn main() {
     } else if args.len() == 2 {
         run_file(&args[1]);
     } else {
-        println!("usage: lox [script]");
-        process::exit(64);
+        run_prompt();
     }
 }
 
@@ -44,4 +44,21 @@ fn run(source: String) -> bool {
     }
 
     !errors.is_empty()
+}
+
+fn run_prompt() {
+    let stdin = io::stdin();
+    loop {
+        print!("> ");
+        io::stdout().flush().unwrap();
+
+        let mut line = String::new();
+        let bytes_read = stdin.lock().read_line(&mut line).unwrap();
+
+        if bytes_read == 0 {
+            break;
+        }
+
+        run(line);
+    }
 }
