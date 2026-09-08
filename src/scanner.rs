@@ -98,9 +98,16 @@ impl Scanner {
             }
             ' ' | '\r' | '\t' => {}
             '\n' => self.line += 1,
-
-            
-            _ => self.error("Unexpected character.")
+            '"' => self.string(),        
+            _ => {
+                if self.is_digit(c) {
+                    self.number();
+                } else if self.is_alpha(c) {
+                    self.identifier();
+                } else {
+                    self.error("unexpected character");
+                }
+            }
         }
     }
 
@@ -141,6 +148,95 @@ impl Scanner {
             line: self.line,
             message: message.to_string(),
         });
+    }
+
+    fn string(&mut self) {
+        while self.peek() != '"' && !self.is_at_end() {
+            if self.peek() == '\n' {
+                self.line += 1;
+            }
+            self.advance();
+        }
+
+        if self.is_at_end() {
+            self.error("Unterminated string");
+            return;
+        }
+
+        //get closing qoutes
+        self.advance();
+        
+        let value: String = self.source[self.start+1..self.current-1].iter().collect();
+        self.add_token(TokenType::String, Some(Literal::Str(value)));
+    }
+
+    fn is_digit(&self, c: char) -> bool {
+        c >= '0' && c <= '9'
+    }
+
+    fn is_alpha(&self, c: char) -> bool {
+        (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+    }
+
+    fn is_alpha_numeric(&self, c: char) -> bool {
+        self.is_alpha(c) || self.is_digit(c)
+    }
+
+    fn peek_next(&self) -> char {
+        if self.current + 1 >= self.source.len() {
+            return '\0';
+        }
+
+        self.source[self.current + 1]
+    }
+
+    fn number(&mut self) {
+        while self.is_digit(self.peek()) {
+            self.advance();
+        }
+
+        if self.peek() == '.' && self.is_digit(self.peek_next()) {
+            self.advance(); //grab period
+            while self.is_digit(self.peek()) {
+                self.advance();
+            }
+        }
+
+        let text: String = self.source[self.start..self.current].iter().collect();
+        let value: f64 = text.parse().unwrap();
+        self.add_token(TokenType::Number, Some(Literal::Number(value)));
+    }
+
+    fn identifier(&mut self) {
+        while self.is_alpha_numeric(self.peek()) {
+            self.advance();
+        }
+
+        let text: String = self.source[self.start..self.current].iter().collect();
+        let token_type = Scanner::keyword_type(&text);
+        self.add_token(token_type, None);
+    }
+
+    fn keyword_type(text: &str) -> TokenType {
+        match text {
+            "and" => TokenType::And,
+            "class" => TokenType::Class,
+            "else" => TokenType::Else,
+            "false" => TokenType::False,
+            "for" => TokenType::For,
+            "fun" => TokenType::Fun,
+            "if" => TokenType::If,
+            "nil" => TokenType::Nil,
+            "or" => TokenType::Or,
+            "print" => TokenType::Print,
+            "return" => TokenType::Return,
+            "super" => TokenType::Super,
+            "this" => TokenType::This,
+            "true" => TokenType::True,
+            "var" => TokenType::Var,
+            "while" => TokenType::While,
+            _ => TokenType::Identifier
+        }
     }
     
 }
