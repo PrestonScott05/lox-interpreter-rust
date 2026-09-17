@@ -5,9 +5,11 @@ use std::fmt;
 pub enum Literal {
     Number(f64),
     Str(String),
+    Bool(bool),
+    Nil,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,
@@ -15,7 +17,7 @@ pub struct Token {
     pub line: usize,
 }
 
-impl Token {
+impl Token {    
     pub fn new(token_type: TokenType, lexeme: String, literal: Option<Literal>, line: usize) -> Self {
         // just getting used to the last thing in a functino being it's return value
         Token {
