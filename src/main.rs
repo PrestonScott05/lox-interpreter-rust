@@ -2,6 +2,9 @@ mod token;
 mod token_type;
 mod scanner;
 mod expression;
+mod parser;
+
+
 
 use std::env;
 use std::fs;
@@ -9,6 +12,9 @@ use std::process;
 use std::io::{self, Write, BufRead};
 
 use scanner::Scanner;
+use parser::Parser;
+
+
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -33,18 +39,25 @@ fn run_file(path: &str) {
 
 fn run(source: String) -> bool {
     let mut scanner = Scanner::new(source);
-    let tokens = scanner.scan_tokens();
-
-    for token in tokens {
-        println!("{}", token);
-    }
+    let tokens = scanner.scan_tokens().clone();
 
     let errors = scanner.errors();
     for err in errors {
         eprintln!("[line {}] Error: {}", err.line, err.message);
     }
+    if !errors.is_empty() {
+        return true;
+    }
 
-    !errors.is_empty()
+    let mut parser = Parser::new(tokens);
+    match parser.parse() {
+        Ok(expr) => {
+            println!("{}", expression::print(&expr));
+            false
+        }
+        // parser already printed the error
+        Err(_) => true,
+    }
 }
 
 fn run_prompt() {

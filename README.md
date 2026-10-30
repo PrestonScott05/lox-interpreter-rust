@@ -3,7 +3,6 @@
 - this was built for an assignment in CS 403 at the University of Alabama
 - I chose rust because I wanted to learn it. 
 
-## - Chapter 4: Scanning
 
 ### Build
 cargo build
@@ -18,3 +17,9 @@ Or start the interactive REPL (no arguments):
 
 ### Test
 cargo test
+
+### Progress:
+- Chapter 4: Scanning - Completed
+- Chapter 5: Representing Code - Completed
+- Chapter 6: Parsing Expressions - Completed
+- Next - Chapter 7
