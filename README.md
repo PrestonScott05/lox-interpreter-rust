@@ -9,6 +9,23 @@ My interpreter follows the interpreter written in java at www.craftinginterprete
 Chapter 7 - evaluating expressions
 - our interpreter evaluates expressions through our repl according to the requirements in craftinginterpreters
 
+### File Structure
+
+ lox-interpreter-rust/
+    ├── Cargo.toml          # package manifest (no external dependencies)
+    ├── README.md
+    └── src/
+        ├── main.rs         # entry point: runs a script file or the REPL; 
+        ├── token_type.rs   # TokenType enum: every kind of token Lox recognizes
+        ├── token.rs        # Token struct and Literal enum (the values the scanner pulls out of source text)
+        ├── scanner.rs      # Scanner: turns source text into a Vec<Token> (Ch. 4)
+        ├── expression.rs   # Expression enum (the AST) and an AST printer used in tests (Ch. 5)
+        ├── parser.rs       # recursive descent Parser: Vec<Token> -> Expression, with error reporting (Ch. 6)
+        ├── value.rs        # Value enum: runtime Lox values, printed the way jlox prints them (Ch. 7)
+        └── interpreter.rs  # Interpreter: evaluates an Expression to a Value; RuntimeError (Ch. 7)
+
+**Pipeline:** source text → `Scanner` → tokens → `Parser` → `Expression` (AST) → `Interpreter` → `Value`
+
 ### Build
 cargo build
 
