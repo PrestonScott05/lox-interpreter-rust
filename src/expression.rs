@@ -13,6 +13,7 @@ pub enum Expression {
 }
 
 //we can actually use match the correct way bc rust is great. this means we can skip almost all of chapter 5 (i found this out after doing it all...)
+#[allow(dead_code)]
 pub fn print(expr: &Expression) -> String {
     match expr {
         Expression::Literal {value} => {
