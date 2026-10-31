@@ -20,6 +20,13 @@ pub enum Expression {
         name: Token,
         value: Box <Expression>
     },
+
+    Logical {
+        left: Box<Expression>,
+        operator: Token,
+        right: Box<Expression>
+    },
+
 }
 
 //we can actually use match the correct way bc rust is great. this means we can skip almost all of chapter 5 (i found this out after doing it all...)
@@ -44,6 +51,8 @@ pub fn print(expr: &Expression) -> String {
         Expression::Variable {name } => name.lexeme.clone(),
 
         Expression::Assign { name, value } => format!("(= {} {})", name.lexeme, print(value)),
+
+        Expression::Logical { left, operator, right } => format!("({} {} {})", operator.lexeme, print(left), print(right)),
     }
 }
 
