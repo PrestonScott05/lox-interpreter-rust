@@ -11,5 +11,16 @@ pub enum Stmt {
     },
 
     Block(Vec<Stmt>),
+
+    If {
+        condition: Expression,
+        then_branch: Box<Stmt>,
+        else_branch: Option<Box<Stmt>>,
+    },
+
+    While {
+        condition: Expression,
+        body: Box<Stmt>
+    }
 }
 

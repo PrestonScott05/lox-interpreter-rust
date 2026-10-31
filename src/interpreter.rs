@@ -72,6 +72,24 @@ impl<W: Write> Interpreter<W> {
                 let env = Environment::new_enclosed(Rc::clone(&self.environment));
                 self.execute_block(statements, Rc::new(RefCell::new(env)))?;
             }
+
+            Stmt::If { condition, then_branch, else_branch } => {
+                if Self::is_truthy(&self.evaluate(condition)?) {
+
+                    self.execute(then_branch)?;
+
+                } else if let Some(else_branch) = else_branch {
+
+                    self.execute(else_branch)?;
+
+                }
+            }
+
+            Stmt::While { condition, body } => {
+                while Self::is_truthy(&self.evaluate(condition)?) {
+                    self.execute(body)?;
+                }
+            }
         }
 
         Ok(())
@@ -147,6 +165,21 @@ impl<W: Write> Interpreter<W> {
                 let var = self.evaluate(value)?;
                 self.environment.borrow_mut().assign(name, var.clone())?;
                 Ok(var)
+            }
+
+             Expression::Logical { left, operator, right } => {
+                let l = self.evaluate(left)?;
+
+                if operator.token_type == TokenType::Or {
+
+                    if Self::is_truthy(&l) {
+                        return Ok(l);
+                    }
+                } else if !Self::is_truthy(&l) {
+                    return Ok(l);
+                }
+
+                self.evaluate(right)
             }
         }
     }
@@ -366,6 +399,108 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
             .filter_map(|line| line.split_once("// expect: "))
             .map(|(_, expected)| format!("{}\n", expected.trim_end()))
             .collect()
+    }
+
+    fn check_script(source: &str) {
+        assert_eq!(run_script(source), expected_output(source));
+    }
+
+    #[test]
+    fn logical_returns_operands() {
+        check_script(r#"
+            print "hi" or 2; // expect: hi
+            print nil or "yes"; // expect: yes
+            print false and 1; // expect: false
+            print 1 and 2; // expect: 2
+        "#);
+    }
+
+    #[test]
+    fn logical_short_circuits() {
+        // if the right side ran, a would change
+        check_script(r#"
+            var a = 0;
+            true or (a = 1);
+            false and (a = 1);
+            print a; // expect: 0
+            false or (a = 2);
+            print a; // expect: 2
+        "#);
+    }
+
+    #[test]
+    fn if_else_branches() {
+        check_script(r#"
+            if (true) print "then"; else print "else"; // expect: then
+            if (nil) print "then"; else print "else"; // expect: else
+            if (false) print "nope";
+            if (0) print "zero is truthy"; // expect: zero is truthy
+        "#);
+    }
+
+    #[test]
+    fn dangling_else_runs_correctly() {
+        check_script(r#"
+            if (true) if (false) print "a"; else print "b"; // expect: b
+            if (false) if (true) print "c"; else print "d";
+            print "done"; // expect: done
+        "#);
+    }
+
+    #[test]
+    fn while_loop() {
+        check_script(r#"
+            var i = 0;
+            while (i < 3) {
+                print i;
+                i = i + 1;
+            }
+            // expect: 0
+            // expect: 1
+            // expect: 2
+        "#);
+    }
+
+    #[test]
+    fn for_loop_scopes_its_variable() {
+        check_script(r#"
+            for (var i = 0; i < 2; i = i + 1) print i;
+            // expect: 0
+            // expect: 1
+        "#);
+        let e = run_then_eval("for (var i = 0; i < 1; i = i + 1) {}", "i").unwrap_err();
+        assert_eq!(e.message, "Undefined variable 'i'.");
+    }
+
+    #[test]
+    fn for_with_expression_initializer_uses_outer_var() {
+        assert_eq!(
+            run_then_eval("var i; for (i = 0; i < 5; i = i + 1) {}", "i").unwrap(),
+            Value::Number(5.0)
+        );
+    }
+
+    #[test]
+    fn fibonacci_from_the_book() {
+        let out = run_script(r#"
+            var a = 0;
+            var temp;
+            for (var b = 1; a < 10000; b = temp + b) {
+                print a;
+                temp = a;
+                a = b;
+            }
+        "#);
+        let nums: Vec<&str> = out.lines().collect();
+        assert_eq!(nums.len(), 21);
+        assert_eq!(nums.last(), Some(&"6765"));
+    }
+
+    #[test]
+    fn error_in_while_condition_stops_the_loop() {
+        let mut interp = Interpreter::with_output(Vec::new());
+        let result = interp.interpret(&parse("while (-\"x\") print 1;"));
+        assert_eq!(result.unwrap_err().message, "Operand must be a number.");
     }
 
 }
