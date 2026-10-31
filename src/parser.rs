@@ -1,6 +1,7 @@
 use crate::token::{Literal, Token};
 use crate::token_type::TokenType;
 use crate::expression::Expression;
+use crate::stmt::{Stmt};
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -11,6 +12,7 @@ pub struct ParseError {
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
+    errors: Vec<ParseError>,
 }
 
 
@@ -19,16 +21,125 @@ impl Parser {
         Parser {
             tokens: in_tokens,
             current: 0,
+            errors: Vec::new(),
         }
     }
 
-    // entry point - the error was already reported in error(), so callers just need to know it failed
-    pub fn parse(&mut self) -> Result<Expression, ParseError> {
-        self.expression()
+   
+    pub fn parse(&mut self) -> Result<Vec<Stmt>, Vec<ParseError>> {
+        let mut statements = Vec::new();
+        while !self.is_at_end() {
+            if let Some(stmt) = self.declaration() {
+                statements.push(stmt);
+            }
+        }
+        if self.errors.is_empty() {
+            Ok(statements)
+        }
+        else {
+            Err(std::mem::take(&mut self.errors))
+        }
+        
+    }
+
+    fn declaration(&mut self) -> Option<Stmt> {
+        let result = if self.match_token(&[TokenType::Var]) {
+            self.var_declaration()
+        } else {
+            self.statement()
+        };
+
+        match result {
+            Ok(stmt) => Some(stmt),
+
+            Err(e) => {
+                self.errors.push(e);
+                self.synchronize();
+                None
+            }
+        }
+    }
+
+    fn var_declaration(&mut self) -> Result<Stmt, ParseError> {
+        let name = self.consume(TokenType::Identifier, "Expect variable name.")?;
+
+        let initializer = if self.match_token(&[TokenType::Equal]) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+
+        self.consume(TokenType::Semicolon, "Expect ';' after variable declaration.")?;
+        Ok(Stmt::Var { name, initializer })
+    }
+
+    fn statement(&mut self) -> Result<Stmt, ParseError> {
+        if self.match_token(&[TokenType::Print]) {
+            return self.print_statement()
+        }
+        
+        if self.match_token(&[TokenType::LeftBrace]) {
+            return Ok(Stmt::Block(self.block()?));
+        }
+        self.expression_statement()
+    }
+
+    fn block(&mut self) -> Result<Vec<Stmt>, ParseError> {
+        let mut statements = Vec::new();
+
+        while !self.check(TokenType::RightBrace) && !self.is_at_end() {
+            if let Some(stmt) = self.declaration() {
+                statements.push(stmt);
+            }
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after block.")?;
+        
+        Ok(statements)
+    }
+
+    fn print_statement(&mut self) -> Result<Stmt, ParseError> {
+        let val = self.expression()?;
+
+        self.consume(TokenType::Semicolon, "Expected a ';' after the value.")?;
+
+        Ok(Stmt::Print(val))
+    }
+
+    fn expression_statement(&mut self) -> Result<Stmt, ParseError> {
+        let expr = self.expression()?;
+
+        self.consume(TokenType::Semicolon, "Expected a ';' after the expression")?;
+
+        Ok(Stmt::Expression(expr))
     }
 
     fn expression(&mut self) -> Result<Expression, ParseError> {
-        self.equality()
+        self.assignment()
+    }
+
+    fn assignment(&mut self) -> Result<Expression, ParseError> {
+         let expr = self.equality()?;
+
+        if self.match_token(&[TokenType::Equal]) {
+            let equals = self.previous();
+            let value = self.assignment()?; //recurse!
+
+            return match expr {
+                Expression::Variable { name } => Ok(Expression::Assign {
+                    name,
+                    value: Box::new(value),
+                }),
+
+                other => {
+                    let err = self.error(equals, "Invalid assignment target.");
+                    self.errors.push(err); //we should repor, but not return the err
+                    Ok(other)
+                }
+            };
+        }
+
+        Ok(expr)
     }
 
     fn error(&self, token:Token, message: &str) -> ParseError {
@@ -209,6 +320,12 @@ impl Parser {
             });
         }
 
+        if self.match_token(&[TokenType::Identifier]) {
+            return Ok(Expression::Variable {
+                name: self.previous()
+            });
+        }
+
         if self.match_token(&[TokenType::LeftParen]) {
             let expr: Expression = self.expression()?;
             self.consume(TokenType::RightParen, "Expected ')' after expression.")?;
@@ -227,15 +344,30 @@ mod tests {
     use super::*;
     use crate::expression::print;
     use crate::scanner::Scanner;
+    use crate::stmt::Stmt;
 
-    fn parse_source(source: &str) -> Result<Expression, ParseError> {
-        let mut scanner = Scanner::new(source.to_string());
+    fn parse_source(source: &str) -> Result<Expression, Vec<ParseError>> {
+        let mut scanner = Scanner::new(format!("{source};"));
+
         let tokens = scanner.scan_tokens().clone();
-        Parser::new(tokens).parse()
+
+        let stmts = Parser::new(tokens).parse()?;
+
+        match stmts.as_slice() {
+            [Stmt::Expression(expression)] => Ok(expression.clone()),
+
+            other => panic!("expected one expression statement, got {other:?}"),
+        }
     }
 
     fn parse_to_string(source: &str) -> String {
         print(&parse_source(source).expect("should have parsed"))
+    }
+
+    fn parse_program(source: &str) -> Result<Vec<Stmt>, Vec<ParseError>> {
+        let tokens = Scanner::new(source.to_string()).scan_tokens().clone();
+
+        Parser::new(tokens).parse()
     }
 
     #[test]
@@ -273,14 +405,91 @@ mod tests {
 
     #[test]
     fn missing_right_paren_is_an_error() {
-        let err = parse_source("(1 + 2").unwrap_err();
-        assert_eq!(err.message, "Expected ')' after expression.");
-        assert_eq!(err.token.token_type, TokenType::Eof);
+        let errs = parse_source("(1 + 2").unwrap_err();
+        assert_eq!(errs[0].message, "Expected ')' after expression.");
+        assert_eq!(errs[0].token.token_type, TokenType::Semicolon);
     }
 
     #[test]
     fn missing_operand_is_an_error() {
-        let err = parse_source("1 +").unwrap_err();
-        assert_eq!(err.message, "Expected expression.");
+        let errs = parse_source("1 +").unwrap_err();
+        assert_eq!(errs[0].message, "Expected expression.");
+    }
+
+     #[test]
+    fn parses_print_statement() {
+        let tokens = Scanner::new("print 1 + 2;".to_string()).scan_tokens().clone();
+        let stmts = Parser::new(tokens).parse().unwrap();
+        assert!(matches!(stmts.as_slice(), [Stmt::Print(_)]));
+    }
+
+    #[test]
+    fn parses_var_with_initializer() {
+        let stmts = parse_program("var a = 1;").unwrap();
+
+        assert!(matches!(
+            stmts.as_slice(), 
+            [Stmt::Var { initializer: Some(_), .. }]
+        ));
+    }
+
+    #[test]
+    fn parses_var_without_initializer() {
+        let stmts = parse_program("var a;").unwrap();
+
+        assert!(matches!(
+            stmts.as_slice(), 
+            [Stmt::Var { initializer: None, .. }]
+        ));
+    }
+
+    #[test]
+    fn parses_variable_expression() {
+        assert_eq!(parse_to_string("a"), "a");
+    }
+
+    #[test]
+    fn var_missing_name_is_error() {
+        let errs = parse_program("var = 1;").unwrap_err();
+
+        assert_eq!(errs[0].message, "Expect variable name.");
+    }
+
+    #[test]
+    fn recovers_after_error_and_keepsparsing() {
+        let errs = parse_program("var = 1; var = 2; print 3;").unwrap_err();
+
+        assert_eq!(errs.len(), 2);
+    }
+
+    #[test]
+    fn parses_assignment() {
+        assert_eq!(parse_to_string("a = 1"), "(= a 1)");
+    }
+
+    #[test]
+    fn assignment_is_right_associative() {
+        assert_eq!(parse_to_string("a = b = c"), "(= a (= b c))");
+    }
+
+    #[test]
+    fn invalid_assignment_targets() {
+        assert_eq!(parse_source("a + b = c").unwrap_err()[0].message, "Invalid assignment target.");
+        assert_eq!(parse_source("(a) = 3").unwrap_err()[0].message, "Invalid assignment target.");
+    }
+
+    #[test]
+    fn parses_block() {
+        let stmts = parse_program("{ var a = 1; print a; }").unwrap();
+        match stmts.as_slice() {
+            [Stmt::Block(inner)] => assert_eq!(inner.len(), 2),
+            other => panic!("expected one block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unclosed_block_is_an_error() {
+        let errs = parse_program("{ var a = 1;").unwrap_err();
+        assert_eq!(errs[0].message, "Expect '}' after block.");
     }
 }

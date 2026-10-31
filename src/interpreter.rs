@@ -1,9 +1,13 @@
-use std::unreachable;
-
-use crate::expression::Expression;
+use crate::expression::{Expression};
 use crate::token::Token;
 use crate::token_type::TokenType;
 use crate::value::Value;
+use crate::stmt::{ Stmt};
+use crate::environment::Environment;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use std::io::{self, Write};
 
 #[derive(Debug)]
 
@@ -13,7 +17,7 @@ pub struct RuntimeError {
 }
 
 impl RuntimeError {
-    fn new(token: &Token, message: &str) -> Self {
+    pub(crate) fn new(token: &Token, message: &str) -> Self {
         RuntimeError {
             token: token.clone(),
             message: message.to_string()
@@ -21,20 +25,59 @@ impl RuntimeError {
     }
 }
 
-pub struct Interpreter;
+pub struct Interpreter<W: Write> {
+    environment: Rc<RefCell<Environment>>,
+    out: W,
+}
 
-impl Interpreter {
+impl Interpreter<io::Stdout> {
     pub fn new() -> Self {
-        Interpreter
+        Self::with_output(io::stdout())
+    }
+}
+
+impl<W: Write> Interpreter<W> {
+    pub fn with_output(out: W) -> Self {
+        Interpreter {
+            environment: Rc::new(RefCell::new(Environment::new())),
+            out
+        }
     }
     
-    pub fn interpret(&self, expr: &Expression) -> Result<(), RuntimeError> {
-        let value = self.evaluate(expr)?;
-        println!("{}", value);
+    pub fn interpret(&mut self, statements: &[Stmt]) -> Result<(), RuntimeError> {
+        for stmt in statements {
+            self.execute(stmt)?;
+        }
         Ok(())
     }
 
-    fn evaluate(&self, expr: &Expression) -> Result<Value, RuntimeError> {
+    fn execute(&mut self, stmt: &Stmt) -> Result<(), RuntimeError> {
+        match stmt {
+            Stmt::Expression(expr) => {
+                self.evaluate(expr)?; // val discarded
+            }
+            Stmt::Print(expr) => {
+                let value = self.evaluate(expr)?;
+                writeln!(self.out, "{}", value).expect("failed to write output");
+            }
+            Stmt::Var {name, initializer} => {
+                let value = match initializer {
+                    Some(expr) => self.evaluate(expr)?,
+                    None => Value::Nil,
+                };
+                self.environment.borrow_mut().define(name.lexeme.clone(), value);
+            }
+
+            Stmt::Block(statements) => {
+                let env = Environment::new_enclosed(Rc::clone(&self.environment));
+                self.execute_block(statements, Rc::new(RefCell::new(env)))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn evaluate(&mut self, expr: &Expression) -> Result<Value, RuntimeError> {
         match expr {
             Expression::Literal { value } => Ok(Value::from(value)),
 
@@ -97,6 +140,14 @@ impl Interpreter {
                     _ => unreachable!("parser only produces arithmetic/comparison/equality binary operators"),
                 }
             }
+
+            Expression::Variable { name } => self.environment.borrow().get(name),
+
+            Expression::Assign { name, value } => {
+                let var = self.evaluate(value)?;
+                self.environment.borrow_mut().assign(name, var.clone())?;
+                Ok(var)
+            }
         }
     }
 
@@ -110,6 +161,13 @@ impl Interpreter {
             _ => a == b,
         }
     }
+
+    fn execute_block(&mut self, statements: &[Stmt], environment: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {
+        let prev = std::mem::replace(&mut self.environment, environment);
+        let result = statements.iter().try_for_each(|stmt| self.execute(stmt));
+        self.environment = prev;
+        result
+    }
 }
 
 
@@ -121,16 +179,36 @@ mod tests {
 
  
     fn eval(source: &str) -> Result<Value, RuntimeError> {
-        let tokens = Scanner::new(source.to_string()).scan_tokens().clone();
-        let expr = Parser::new(tokens).parse().expect("parse failed");
+        let tokens = Scanner::new(format!("{source};")).scan_tokens().clone();
+        let stmts = Parser::new(tokens).parse().expect("parse failed");
 
+        match stmts.as_slice() {
 
-        Interpreter::new().evaluate(&expr)
+            [Stmt::Expression(expression)] => Interpreter::new().evaluate(expression),
+            other => panic!("expected one expression statement, got {other:?}"),
+        }
     }
  
     fn err(source: &str) -> String {
         eval(source).unwrap_err().message
     }
+
+    fn parse(source: &str) -> Vec<Stmt> {
+        let tokens = Scanner::new(source.to_string()).scan_tokens().clone();
+        Parser::new(tokens).parse().expect("parse failed")
+    }
+
+fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
+    let mut interp = Interpreter::new();
+
+    interp.interpret(&parse(program))?;
+
+    match parse(&format!("{expr};")).as_slice() {
+
+        [Stmt::Expression(e)] => interp.evaluate(e),
+        other => panic!("expected one expression statement, got {other:?}"),
+    }
+}
  
     #[test]
     fn arithmetic_and_precedence() {
@@ -186,4 +264,108 @@ mod tests {
         assert_eq!(eval("1 + 2").unwrap().to_string(), "3");
         assert_eq!(eval("1 / 2").unwrap().to_string(), "0.5");
     }
+
+    #[test]
+    fn undefined_variable_is_A_runtime_error() {
+        assert_eq!(err("nope"), "Undefined variable 'nope'.");
+    }
+
+    #[test]
+    fn variables_persist_betweenstatements() {
+        assert_eq!(run_then_eval("var a = 1;", "a").unwrap(), Value::Number(1.0));
+    }
+
+    #[test]
+    fn uninitialized_var_isa_nil() {
+        assert_eq!(run_then_eval("var a;", "a").unwrap(), Value::Nil);
+    }
+
+    #[test]
+    fn globals_can_be_redefined() {
+        assert_eq!(
+            run_then_eval("var a = 1; var a = \"two\";", "a").unwrap(),
+            Value::Str("two".into())
+        );
+    }
+
+    #[test]
+    fn initializer_can_read_other_variables() {
+        assert_eq!(run_then_eval("var a = 2; var b = a * 3;", "b").unwrap(), Value::Number(6.0));
+    }
+
+    #[test]
+    fn undefined_variable_in_initializer_errors() {
+        let e = run_then_eval("var b = nope;", "1").unwrap_err();
+        assert_eq!(e.message, "Undefined variable 'nope'.");
+    }
+
+    #[test]
+    fn assignment_updates_variable() {
+        assert_eq!(run_then_eval("var a = 1; a = 2;", "a").unwrap(), Value::Number(2.0));
+    }
+
+    #[test]
+    fn assignment_is_an_expression() {
+        assert_eq!(run_then_eval("var a;", "a = 3").unwrap(), Value::Number(3.0));
+    }
+
+    #[test]
+    fn chained_assignment() {
+        assert_eq!(run_then_eval("var a; var b; a = b = 5;", "a").unwrap(), Value::Number(5.0));
+    }
+
+    #[test]
+    fn assigning_undeclared_variable_errors() {
+        assert_eq!(run_then_eval("", "nope = 1").unwrap_err().message, "Undefined variable 'nope'.");
+    }
+
+    #[test]
+    fn shadowing_does_not_leak() {
+        assert_eq!(
+            run_then_eval("var a = \"outer\"; { var a = \"inner\"; }", "a").unwrap(),
+            Value::Str("outer".into())
+        );
+    }
+
+    #[test]
+    fn assignment_in_block_updates_outer() {
+        assert_eq!(run_then_eval("var a = 1; { a = 2; }", "a").unwrap(), Value::Number(2.0));
+    }
+
+    #[test]
+    fn block_locals_disappear() {
+        assert_eq!(
+            run_then_eval("{ var b = 1; }", "b").unwrap_err().message,
+            "Undefined variable 'b'."
+        );
+    }
+
+    #[test]
+    fn environment_restored_after_error_in_block() {
+        let mut interp = Interpreter::new();
+        let result = interp.interpret(&parse("var g = \"global\"; { var g = \"local\"; -\"oops\"; }"));
+        assert!(result.is_err());
+        match parse("g;").as_slice() {
+            [Stmt::Expression(e)] => {
+                assert_eq!(interp.evaluate(e).unwrap(), Value::Str("global".into()))
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn run_script(source: &str) -> String {
+        let mut interpreter = Interpreter::with_output(Vec::new());
+        interpreter.interpret(&parse(source)).expect("runtime error");
+
+        String::from_utf8(interpreter.out).unwrap()
+    }
+
+    fn expected_output(source: &str) -> String {
+        source
+            .lines()
+            .filter_map(|line| line.split_once("// expect: "))
+            .map(|(_, expected)| format!("{}\n", expected.trim_end()))
+            .collect()
+    }
+
 }
