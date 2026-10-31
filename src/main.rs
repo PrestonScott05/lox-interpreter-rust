@@ -5,6 +5,8 @@ mod expression;
 mod parser;
 mod value;
 mod interpreter;
+mod stmt;
+mod environment;
 
 
 
@@ -37,8 +39,8 @@ fn main() {
 
 fn run_file(path: &str) {
     let source = fs::read_to_string(path).expect("couldn't read the file");
-    let interpreter = Interpreter::new();
-    match run(source, &interpreter) {
+    let mut interpreter = Interpreter::new();
+    match run(source, &mut interpreter) {
 
         Err(LoxError::Syntax) => process::exit(65),
         Err(LoxError::Runtime) => process::exit(70),
@@ -51,7 +53,7 @@ enum LoxError {
     Runtime,
 }
 
-fn run(source: String, interpreter: &Interpreter) -> Result<(), LoxError> {
+fn run(source: String, interpreter: &mut Interpreter<io::Stdout>) -> Result<(), LoxError> {
 
     let mut scanner = Scanner::new(source);
     let tokens = scanner.scan_tokens().clone();
@@ -66,9 +68,9 @@ fn run(source: String, interpreter: &Interpreter) -> Result<(), LoxError> {
 
     let mut parser = Parser::new(tokens);
     //means the parser already printed the error lol
-    let expr = parser.parse().map_err(|_| LoxError::Syntax)?;
+    let statements = parser.parse().map_err(|_| LoxError::Syntax)?;
 
-    interpreter.interpret(&expr).map_err(|err| {
+    interpreter.interpret(&statements).map_err(|err| {
         eprintln!("{}\n[line {}]", err.message, err.token.line);
         LoxError::Runtime
     })
@@ -76,7 +78,7 @@ fn run(source: String, interpreter: &Interpreter) -> Result<(), LoxError> {
 
 fn run_prompt() {
   //one interpreter for the entire session
-    let interpreter = Interpreter::new();
+    let mut interpreter = Interpreter::new();
     let stdin = io::stdin();
     loop {
         print!("> ");
@@ -89,7 +91,7 @@ fn run_prompt() {
             break;
         }
 
-        // errors already reported; REPL keeps going
-        let _ = run(line, &interpreter);
+        //here our errors are already reported, so we can make the repl keep going...
+        let _ = run(line, &mut interpreter);
     }
 }

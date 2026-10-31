@@ -7,13 +7,23 @@ use crate::token::Token;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
     Literal { value: Literal },
+
     Grouping { expression: Box<Expression> },
+
     Unary { operator: Token, right: Box<Expression> },
+
     Binary { left: Box<Expression>, operator: Token, right: Box<Expression> }, 
+
+    Variable { name: Token },
+
+    Assign {
+        name: Token,
+        value: Box <Expression>
+    },
 }
 
 //we can actually use match the correct way bc rust is great. this means we can skip almost all of chapter 5 (i found this out after doing it all...)
-#[allow(dead_code)]
+#[allow(dead_code)] // using this override because eour tests need it!
 pub fn print(expr: &Expression) -> String {
     match expr {
         Expression::Literal {value} => {
@@ -30,6 +40,10 @@ pub fn print(expr: &Expression) -> String {
         Expression::Unary {operator , right } => format!("({} {})", operator.lexeme, print(right)),
     
         Expression::Binary {left, operator, right} => format!("({} {} {})",  operator.lexeme, print(left), print(right)),
+
+        Expression::Variable {name } => name.lexeme.clone(),
+
+        Expression::Assign { name, value } => format!("(= {} {})", name.lexeme, print(value)),
     }
 }
 
