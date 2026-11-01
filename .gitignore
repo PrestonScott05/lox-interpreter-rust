@@ -27,3 +27,6 @@ Thumbs.db
 # Added by cargo
 
 /target
+
+*.zip
+*.lox
