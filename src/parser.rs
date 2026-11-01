@@ -130,7 +130,7 @@ impl Parser {
 
         let condition = self.expression()?;
 
-        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+        self.consume(TokenType::RightParen, "Expect ')' after condition.")?; 
 
         let body = self.statement()?;
 
