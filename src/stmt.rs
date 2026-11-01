@@ -1,5 +1,14 @@
 use crate::expression::Expression;
 use crate::token::Token;
+use std::rc::Rc;
+
+#[derive(Debug)]
+pub struct FunctionDecl {
+    pub name: Token, 
+    pub params: Vec<Token>,
+    pub body: Vec<Stmt>,
+}
+
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
@@ -21,6 +30,14 @@ pub enum Stmt {
     While {
         condition: Expression,
         body: Box<Stmt>
+    },
+
+    Function(Rc<FunctionDecl>),
+
+    Return {
+        #[allow(dead_code)]
+        keyword: Token,
+        value: Option<Expression>,
     }
 }
 

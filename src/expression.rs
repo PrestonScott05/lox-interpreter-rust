@@ -27,6 +27,10 @@ pub enum Expression {
         right: Box<Expression>
     },
 
+    Call {
+        callee: Box<Expression>, paren: Token, arguments: Vec<Expression> 
+    },
+
 }
 
 //we can actually use match the correct way bc rust is great. this means we can skip almost all of chapter 5 (i found this out after doing it all...)
@@ -53,6 +57,12 @@ pub fn print(expr: &Expression) -> String {
         Expression::Assign { name, value } => format!("(= {} {})", name.lexeme, print(value)),
 
         Expression::Logical { left, operator, right } => format!("({} {} {})", operator.lexeme, print(left), print(right)),
+
+        Expression::Call { callee, arguments, ..} => {
+            let args: Vec<String> = arguments.iter().map(print).collect();
+
+            format!("(call {} {})", print(callee), args.join(" "))
+        }
     }
 }
 

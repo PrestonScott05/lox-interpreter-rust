@@ -1,7 +1,8 @@
 use crate::token::{Literal, Token};
 use crate::token_type::TokenType;
 use crate::expression::Expression;
-use crate::stmt::{Stmt};
+use crate::stmt::{Stmt, FunctionDecl};
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -43,7 +44,9 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> Option<Stmt> {
-        let result = if self.match_token(&[TokenType::Var]) {
+        let result = if self.match_token(&[TokenType::Fun]) {
+            self.function("function")
+        } else if self.match_token(&[TokenType::Var]) {
             self.var_declaration()
         } else {
             self.statement()
@@ -58,6 +61,37 @@ impl Parser {
                 None
             }
         }
+    }
+
+    fn function(&mut self, kind: &str) -> Result<Stmt, ParseError> {
+        let name = self.consume(TokenType::Identifier, &format!("Expect {kind} name."))?;
+
+        self.consume(TokenType::LeftParen, &format!{"Expect '(' after {kind} name."})?;
+
+        let mut params = Vec::new();
+
+        if !self.check(TokenType::RightParen) {
+            loop {
+                if params.len() >= 255 {
+                    let err = self.error(self.peek(), "Can't have more than 255 parameters.");
+                    
+                    self.errors.push(err); 
+                }
+
+                params.push(self.consume(TokenType::Identifier, "Expect parameter name.")?);
+
+                if !self.match_token(&[TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RightParen, "Expect ')' after parameters.")?;
+
+        self.consume(TokenType::LeftBrace, &format!("Expect '{{' before {kind} body."))?;
+        let body = self.block()?;
+
+        Ok(Stmt::Function(Rc::new(FunctionDecl { name, params, body })))
     }
 
     fn var_declaration(&mut self) -> Result<Stmt, ParseError> {
@@ -86,6 +120,10 @@ impl Parser {
 
         if self.match_token(&[TokenType::Print]) {
             return self.print_statement()
+        }
+
+        if self.match_token(&[TokenType::Return]) {
+            return self.return_statement()
         }
         
         if self.match_token(&[TokenType::LeftBrace]) {
@@ -195,6 +233,19 @@ impl Parser {
         self.consume(TokenType::Semicolon, "Expected a ';' after the value.")?;
 
         Ok(Stmt::Print(val))
+    }
+
+    fn return_statement(&mut self) -> Result<Stmt, ParseError> {
+        let keyword = self.previous();
+
+        let value = if !self.check(TokenType::Semicolon) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+
+        self.consume(TokenType::Semicolon, "Expect ';' after return value.")?;
+        Ok(Stmt::Return {keyword, value})
     }
 
     fn expression_statement(&mut self) -> Result<Stmt, ParseError> {
@@ -419,7 +470,43 @@ impl Parser {
                 right: Box::new(right)
             });
         }
-        self.primary()
+        self.call()
+    }
+
+    fn call(&mut self) -> Result<Expression, ParseError> {
+        let mut expr = self.primary()?;
+
+        loop {
+            if self.match_token(&[TokenType::LeftParen]) {
+                expr = self.finish_call(expr)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(expr)
+    }
+
+    fn finish_call(&mut self, callee: Expression) -> Result<Expression, ParseError> {
+        let mut arguments = Vec::new();
+
+        if !self.check(TokenType::RightParen) {
+            loop {
+                if arguments.len() >= 255 {
+                    let err = self.error(self.peek(), "Can't have more than 255 arguments.");
+                    self.errors.push(err);
+                }
+                arguments.push(self.expression()?);
+
+                if !self.match_token(&[TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+
+        let paren = self.consume(TokenType::RightParen, "Expect ')' after arguments.")?;
+
+        Ok(Expression::Call { callee: Box::new(callee), paren, arguments })
     }
 
     fn primary(&mut self) -> Result<Expression, ParseError> {
@@ -677,5 +764,46 @@ mod tests {
     fn missing_paren_after_if_is_an_error() {
         let errs = parse_program("if true) print 1;").unwrap_err();
         assert_eq!(errs[0].message, "Expect '(' after 'if'.");
+    }
+
+    #[test]
+    fn parses_calls() {
+        assert_eq!(parse_to_string("f()"), "(call f )");
+        assert_eq!(parse_to_string("f(1, 2)"), "(call f 1 2)");
+        assert_eq!(parse_to_string("f(1)(2)"), "(call (call f 1) 2)");
+    }
+
+    #[test]
+    fn call_binds_tighter_than_unary() {
+        assert_eq!(parse_to_string("-f(1)"), "(- (call f 1))");
+    }
+
+    #[test]
+    fn too_many_arguments_is_an_error() {
+        let args = vec!["0"; 256].join(", ");
+        let errs = parse_source(&format!("f({args})")).unwrap_err();
+        assert_eq!(errs[0].message, "Can't have more than 255 arguments.");
+    }
+
+    #[test]
+    fn parses_function_declaration() {
+        let stmts = parse_program("fun add(a, b) { return a + b; }").unwrap();
+        match stmts.as_slice() {
+            [Stmt::Function(decl)] => {
+                assert_eq!(decl.name.lexeme, "add");
+                assert_eq!(decl.params.len(), 2);
+                assert!(matches!(decl.body.as_slice(), [Stmt::Return { value: Some(_), .. }]));
+            }
+            other => panic!("expected a function, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bare_return_has_no_value() {
+        let stmts = parse_program("fun f() { return; }").unwrap();
+        match stmts.as_slice() {
+            [Stmt::Function(decl)] => assert!(matches!(decl.body.as_slice(), [Stmt::Return { value: None, .. }])),
+            other => panic!("{other:?}"),
+        }
     }
 }

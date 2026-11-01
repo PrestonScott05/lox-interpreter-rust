@@ -1,5 +1,9 @@
 use crate::token::Literal;
 use std::fmt;
+use crate::environment::Environment;
+use crate::stmt::FunctionDecl;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -8,6 +12,38 @@ pub enum Value {
     Str(String),
     Bool(bool),
     Nil,
+    NativeFunction(Rc<NativeFunction>),
+    Function(Rc<LoxFunction>),
+}
+
+#[derive(Debug)]
+pub struct NativeFunction {
+    pub arity: usize,
+    pub func: fn(&[Value]) -> Value,
+}
+
+pub struct LoxFunction {
+    pub declaration: Rc<FunctionDecl>,
+    pub closure: Rc<RefCell<Environment>>,
+}
+
+//we have to do this st the functions are only eq if they're literally the same object
+impl PartialEq for NativeFunction {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+impl PartialEq for LoxFunction {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+impl fmt::Debug for LoxFunction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "<fn {}>", self.declaration.name.lexeme)
+    }
 }
 
 impl From<&Literal> for Value {
@@ -17,6 +53,7 @@ impl From<&Literal> for Value {
             Literal::Str(s) => Value::Str(s.clone()),
             Literal::Bool(b) => Value::Bool(*b),
             Literal::Nil => Value::Nil,
+            
         }
     }
 }
@@ -28,6 +65,8 @@ impl fmt::Display for Value {
             Value::Str(s) => write!(f, "{}", s),
             Value::Bool(b) => write!(f, "{}", b),
             Value::Nil => write!(f, "nil"),
+            Value::NativeFunction(_) => write!(f, "<native fn>"),
+            Value::Function(func) => write!(f, "<fn {}>", func.declaration.name.lexeme)
         }
     }
 }

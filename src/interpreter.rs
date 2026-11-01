@@ -1,16 +1,16 @@
 use crate::expression::{Expression};
 use crate::token::Token;
 use crate::token_type::TokenType;
-use crate::value::Value;
+use crate::value::{LoxFunction, NativeFunction, Value};
 use crate::stmt::{ Stmt};
 use crate::environment::Environment;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::io::{self, Write};
 
 #[derive(Debug)]
-
 pub struct RuntimeError {
     pub token: Token, 
     pub message: String,
@@ -23,6 +23,29 @@ impl RuntimeError {
             message: message.to_string()
         }
     }
+}
+
+//we have to unwind a return statement like the errors, but since we don't have exceptions (like the book),
+// we have to "unwind". This trick was found utilizing claude sonnet 5, as I was completely lost. 
+
+enum Unwind {
+    Error(RuntimeError),
+    Return(Value),
+}
+
+impl From<RuntimeError> for Unwind {
+    fn from(err: RuntimeError) -> Self {
+        Unwind::Error(err)
+    }
+}
+
+fn clock(_args: &[Value]) -> Value {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+
+    Value::Number(seconds)
 }
 
 pub struct Interpreter<W: Write> {
@@ -38,20 +61,32 @@ impl Interpreter<io::Stdout> {
 
 impl<W: Write> Interpreter<W> {
     pub fn with_output(out: W) -> Self {
+        let globals = Rc::new(RefCell::new(Environment::new()));
+        
+        globals.borrow_mut().define(
+            "clock".to_string(), 
+            Value::NativeFunction(Rc::new(NativeFunction { arity:  0, func: clock })),
+        );
+
         Interpreter {
-            environment: Rc::new(RefCell::new(Environment::new())),
+            environment: globals,
             out
         }
     }
     
     pub fn interpret(&mut self, statements: &[Stmt]) -> Result<(), RuntimeError> {
         for stmt in statements {
-            self.execute(stmt)?;
+            match self.execute(stmt) {
+                Ok(()) => {}
+                Err(Unwind::Error(err)) => return Err(err),
+
+                Err(Unwind::Return(_)) => return Ok(()),
+            }
         }
         Ok(())
     }
 
-    fn execute(&mut self, stmt: &Stmt) -> Result<(), RuntimeError> {
+    fn execute(&mut self, stmt: &Stmt) -> Result<(), Unwind> {
         match stmt {
             Stmt::Expression(expr) => {
                 self.evaluate(expr)?; // val discarded
@@ -89,6 +124,24 @@ impl<W: Write> Interpreter<W> {
                 while Self::is_truthy(&self.evaluate(condition)?) {
                     self.execute(body)?;
                 }
+            }
+
+            Stmt::Function(declaration) => {
+                let function = LoxFunction {
+                    declaration: Rc::clone(declaration),
+                    closure: Rc::clone(&self.environment),
+                };
+
+                self.environment.borrow_mut().define(declaration.name.lexeme.clone(), Value::Function(Rc::new(function)));
+            }
+
+            Stmt::Return { keyword, value } => {
+                let value = match value {
+                    Some(expr) => self.evaluate(expr)?,
+                    None => Value::Nil,
+                };
+
+                return Err(Unwind::Return(value));
             }
         }
 
@@ -181,7 +234,52 @@ impl<W: Write> Interpreter<W> {
 
                 self.evaluate(right)
             }
+
+            Expression::Call {callee, paren, arguments  } => {
+                let callee = self.evaluate(callee)?;
+
+                let mut args = Vec::with_capacity(arguments.len());
+
+                for arg in arguments {
+                    args.push(self.evaluate(arg)?);
+                }
+
+                self.call(callee, args, paren)
+            }
         }
+    }
+
+    fn call(&mut self, callee: Value, args: Vec<Value>, paren: &Token) -> Result<Value, RuntimeError> {
+        match callee {
+            Value::NativeFunction(native) => {
+                Self::check_arity(native.arity, args.len(), paren)?;
+                Ok((native.func)(&args))
+            }
+
+            Value::Function(function) => {
+                Self::check_arity(function.declaration.params.len(), args.len(), paren)?;
+
+                let mut env = Environment::new_enclosed(Rc::clone(&function.closure));
+
+                for (param, arg) in function.declaration.params.iter().zip(args) {
+                    env.define(param.lexeme.clone(), arg);
+                }
+
+                 match self.execute_block(&function.declaration.body, Rc::new(RefCell::new(env))) {
+                    Ok(()) => Ok(Value::Nil),
+                    Err(Unwind::Return(value)) => Ok(value),
+                    Err(Unwind::Error(err)) => Err(err),
+                }
+            }
+            _ => Err(RuntimeError::new(paren, "Can only call functions and classes.")),
+        }
+    }
+
+    fn check_arity(expected: usize, got: usize, paren: &Token) -> Result<(), RuntimeError> {
+        if expected != got {
+            return Err(RuntimeError::new(paren, &format!("Expected {expected} arguments but got {got}.")));
+        }
+        Ok(())
     }
 
     fn is_truthy(value: &Value) -> bool {
@@ -195,7 +293,7 @@ impl<W: Write> Interpreter<W> {
         }
     }
 
-    fn execute_block(&mut self, statements: &[Stmt], environment: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {
+    fn execute_block(&mut self, statements: &[Stmt], environment: Rc<RefCell<Environment>>) -> Result<(), Unwind> {
         let prev = std::mem::replace(&mut self.environment, environment);
         let result = statements.iter().try_for_each(|stmt| self.execute(stmt));
         self.environment = prev;
@@ -501,6 +599,105 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
         let mut interp = Interpreter::with_output(Vec::new());
         let result = interp.interpret(&parse("while (-\"x\") print 1;"));
         assert_eq!(result.unwrap_err().message, "Operand must be a number.");
+    }
+
+        #[test]
+    fn calls_a_function_with_arguments() {
+        check_script(r#"
+            fun sayHi(first, last) {
+                print "Hi, " + first + " " + last + "!";
+            }
+            sayHi("Dear", "Reader"); // expect: Hi, Dear Reader!
+        "#);
+    }
+
+    #[test]
+    fn functions_print_their_name() {
+        check_script(r#"
+            fun add(a, b) {}
+            print add; // expect: <fn add>
+            print clock; // expect: <native fn>
+        "#);
+    }
+
+    #[test]
+    fn return_values_and_implicit_nil() {
+        check_script(r#"
+            fun one() { return 1; }
+            fun nothing() { return; }
+            fun noReturn() {}
+            print one(); // expect: 1
+            print nothing(); // expect: nil
+            print noReturn(); // expect: nil
+        "#);
+    }
+
+    #[test]
+    fn recursion_fib() {
+        check_script(r#"
+            fun fib(n) {
+                if (n <= 1) return n;
+                return fib(n - 2) + fib(n - 1);
+            }
+            print fib(20); // expect: 6765
+        "#);
+    }
+
+    #[test]
+    fn return_breaks_out_of_loops() {
+        check_script(r#"
+            fun firstOver(n) {
+                var i = 0;
+                while (true) {
+                    if (i > n) return i;
+                    i = i + 1;
+                }
+            }
+            print firstOver(3); // expect: 4
+        "#);
+    }
+
+    #[test]
+    fn environment_restored_after_return_from_block() {
+        check_script(r#"
+            var a = "global";
+            fun f() { { var a = "inner"; return a; } }
+            print f(); // expect: inner
+            print a; // expect: global
+        "#);
+    }
+
+    #[test]
+    fn closures_keep_their_environment() {
+        check_script(r#"
+            fun makeCounter() {
+                var i = 0;
+                fun count() {
+                    i = i + 1;
+                    print i;
+                }
+                return count;
+            }
+            var counter = makeCounter();
+            counter(); // expect: 1
+            counter(); // expect: 2
+        "#);
+    }
+
+    #[test]
+    fn clock_returns_a_number() {
+        check_script("print clock() > 0; // expect: true");
+    }
+
+    #[test]
+    fn calling_a_non_function_errors() {
+        assert_eq!(err("\"not a fn\"()"), "Can only call functions and classes.");
+    }
+
+    #[test]
+    fn wrong_argument_count_errors() {
+        let e = run_then_eval("fun f(a, b) {}", "f(1)").unwrap_err();
+        assert_eq!(e.message, "Expected 2 arguments but got 1.");
     }
 
 }
