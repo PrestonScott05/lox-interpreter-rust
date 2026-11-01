@@ -14,14 +14,28 @@ use std::env;
 use std::fs;
 use std::process;
 use std::io::{self, Write, BufRead};
+use std::thread;
 
 use scanner::Scanner;
 use parser::Parser;
 use interpreter::Interpreter;
 
 
+const STACK_SIZE: usize = 256 * 1024 * 1024;
+
 
 fn main() {
+    let interpreter_thread = thread::Builder::new()
+        .stack_size(STACK_SIZE)
+        .spawn(run_main)
+        .expect("couldn't start the interpreter thread");
+
+    if interpreter_thread.join().is_err() {
+        process::exit(70)
+    }
+}
+
+fn run_main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() > 2 {

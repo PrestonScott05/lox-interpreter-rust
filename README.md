@@ -8,7 +8,11 @@ My interpreter follows the interpreter written in java at www.craftinginterprete
 Note: Also, using cargo fmt, you can get some nice code conventions. While reviewing code, if lines are smushed, that's why!
 
 ### Where I'm at:
-Chapter 9 (Control Flow) is complete: on top of Chapter 8's statements, variables, blocks, and assignment, the interpreter now supports if/else, the short-circuiting logical operators and/or, while loops, and for loops (desugared into while in the parser), as specified in Crafting Interpreters.
+Chapter 10 (Functions) is complete on top of Chapter 9's control flow (if/else, the short-circuiting `and`/`or`, and `while`/`for` loops), the interpreter now supports function calls, and a native `clock()` function, as specified in Crafting Interpreters.
+
+Rust-specific notes:
+- The book handles `return` by throwing an exception. Rust has no exceptions, so `execute` returns an `Unwind` enum (`Error` or `Return`), and `?` carries a return up to the function call that catches it.
+- Every Lox call goes through several Rust stack frames, so the interpreter runs on a thread with a 256 MB stack. This lets deep recursion like "sum(5000)" work instead of overflowing the default 1 MB stack which I had some serious debugging issues with....
 
 ### File Structure
 
@@ -43,7 +47,7 @@ Or start the interactive REPL (no arguments):
 ### Test
 cargo test
 
-**SOME TESTS WERE WRITTEN WITH THE ASSISTANCE OF CLAUDE SONNET 5**
+***SOME TESTS WERE WRITTEN WITH THE ASSISTANCE OF CLAUDE SONNET 5***
 
 #### Test Output: 
 cargo test
@@ -51,42 +55,53 @@ cargo test
     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.93s                                  
      Running unittests src\main.rs (target\debug\deps\lox-aee9884658ea698a.exe)
 
-running 62 tests
+running 77 tests
 test expression::tests::prints_nested_tree ... ok
-test interpreter::tests::block_locals_disappear ... ok
 test interpreter::tests::assignment_is_an_expression ... ok
-test interpreter::tests::error_in_while_condition_stops_the_loop ... ok
-test interpreter::tests::initializer_can_read_other_variables ... ok
-test interpreter::tests::for_with_expression_initializer_uses_outer_var ... ok
 test interpreter::tests::chained_assignment ... ok
-test interpreter::tests::display_strips_trailing_zero ... ok
-test interpreter::tests::logical_short_circuits ... ok
-test interpreter::tests::dangling_else_runs_correctly ... ok
+test interpreter::tests::clock_returns_a_number ... ok
+test interpreter::tests::arithmetic_and_precedence ... ok
 test interpreter::tests::environment_restored_after_error_in_block ... ok
+test interpreter::tests::equality ... ok
+test interpreter::tests::assigning_undeclared_variable_errors ... ok
+test interpreter::tests::calls_a_function_with_arguments ... ok
+test interpreter::tests::for_with_expression_initializer_uses_outer_var ... ok
+test interpreter::tests::initializer_can_read_other_variables ... ok
 test interpreter::tests::assignment_in_block_updates_outer ... ok
-test interpreter::tests::globals_can_be_redefined ... ok
+test interpreter::tests::return_values_and_implicit_nil ... ok
+test interpreter::tests::display_strips_trailing_zero ... ok
+test interpreter::tests::assignment_updates_variable ... ok
+test interpreter::tests::calling_a_non_function_errors ... ok
+test interpreter::tests::error_in_while_condition_stops_the_loop ... ok
+test interpreter::tests::block_locals_disappear ... ok
 test interpreter::tests::for_loop_scopes_its_variable ... ok
 test interpreter::tests::fibonacci_from_the_book ... ok
+test interpreter::tests::functions_print_their_name ... ok
 test interpreter::tests::if_else_branches ... ok
-test interpreter::tests::assignment_updates_variable ... ok
-test interpreter::tests::logical_returns_operands ... ok
-test interpreter::tests::assigning_undeclared_variable_errors ... ok
-test interpreter::tests::runtime_errors ... ok
-test interpreter::tests::string_concat ... ok
-test interpreter::tests::shadowing_does_not_leak ... ok
-test interpreter::tests::truthiness ... ok
 test interpreter::tests::comparison ... ok
-test interpreter::tests::undefined_variable_is_A_runtime_error ... ok
-test interpreter::tests::equality ... ok
-test interpreter::tests::while_loop ... ok
-test interpreter::tests::arithmetic_and_precedence ... ok
+test interpreter::tests::dangling_else_runs_correctly ... ok
 test interpreter::tests::nan_equals_itself_like_jlox ... ok
-test parser::tests::assignment_is_right_associative ... ok
+test interpreter::tests::logical_short_circuits ... ok
+test interpreter::tests::closures_keep_their_environment ... ok
+test interpreter::tests::return_breaks_out_of_loops ... ok
+test interpreter::tests::environment_restored_after_return_from_block ... ok
+test interpreter::tests::runtime_errors ... ok
+test interpreter::tests::logical_returns_operands ... ok
+test interpreter::tests::globals_can_be_redefined ... ok
+test interpreter::tests::shadowing_does_not_leak ... ok
+test interpreter::tests::string_concat ... ok
+test interpreter::tests::truthiness ... ok
 test interpreter::tests::undefined_variable_in_initializer_errors ... ok
+test interpreter::tests::undefined_variable_is_a_runtime_error ... ok
 test interpreter::tests::uninitialized_var_isa_nil ... ok
 test interpreter::tests::variables_persist_betweenstatements ... ok
+test interpreter::tests::while_loop ... ok
+test interpreter::tests::wrong_argument_count_errors ... ok
+test parser::tests::assignment_is_right_associative ... ok
 test parser::tests::assignment_still_works_over_logical ... ok
+test parser::tests::bare_return_has_no_value ... ok
 test parser::tests::binary_operators_are_left_associative ... ok
+test parser::tests::call_binds_tighter_than_unary ... ok
 test parser::tests::dangling_else_binds_to_nearest_if ... ok
 test parser::tests::empty_for_is_just_a_while_true ... ok
 test parser::tests::factor_binds_tighter_than_term ... ok
@@ -99,6 +114,8 @@ test parser::tests::missing_paren_after_if_is_an_error ... ok
 test parser::tests::missing_right_paren_is_an_error ... ok
 test parser::tests::parses_assignment ... ok
 test parser::tests::parses_block ... ok
+test parser::tests::parses_calls ... ok
+test parser::tests::parses_function_declaration ... ok
 test parser::tests::parses_if_else ... ok
 test parser::tests::parses_literals ... ok
 test parser::tests::parses_print_statement ... ok
@@ -112,10 +129,12 @@ test parser::tests::unclosed_block_is_an_error ... ok
 test parser::tests::var_missing_name_is_error ... ok
 test scanner::tests::reports_unterminated_string ... ok
 test scanner::tests::scans_number_with_value ... ok
+test parser::tests::too_many_arguments_is_an_error ... ok
 test scanner::tests::scans_single_char_operators ... ok
 test value::tests::matches_jlox_number_output ... ok
+test interpreter::tests::recursion_fib ... ok
 
-test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 77 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
 
 
 ### Progress:
@@ -125,5 +144,6 @@ test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 - Chapter 7: Evaluating Expressions - Completed
 - Chapter 8: statements - Completed
 - Chapter 9: Control Flow - Completed
-- Next: Chapter 10!
+- Chapter 10: Functions - Completed
+- Next: Chapter 11!
 
