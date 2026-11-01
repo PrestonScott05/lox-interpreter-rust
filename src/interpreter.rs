@@ -299,7 +299,7 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
     }
 
     #[test]
-    fn undefined_variable_is_A_runtime_error() {
+    fn undefined_variable_is_a_runtime_error() {
         assert_eq!(err("nope"), "Undefined variable 'nope'.");
     }
 
