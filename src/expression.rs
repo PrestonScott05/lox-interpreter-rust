@@ -1,7 +1,18 @@
 use crate::token::Literal;
 use crate::token::Token;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 
+
+
+//for ch11, we need to have every variable with a unique id so the interpreter cna look up how far away 
+// the resolver found it. 
+
+static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+
+pub fn next_id() -> usize {
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 //i'm using Box<Expression> as a node so we can make a tree
 #[derive(Debug, Clone, PartialEq)]
@@ -14,9 +25,13 @@ pub enum Expression {
 
     Binary { left: Box<Expression>, operator: Token, right: Box<Expression> }, 
 
-    Variable { name: Token },
+    Variable { 
+        id: usize,
+        name: Token
+    },
 
     Assign {
+        id: usize,
         name: Token,
         value: Box <Expression>
     },
@@ -52,9 +67,9 @@ pub fn print(expr: &Expression) -> String {
     
         Expression::Binary {left, operator, right} => format!("({} {} {})",  operator.lexeme, print(left), print(right)),
 
-        Expression::Variable {name } => name.lexeme.clone(),
+        Expression::Variable {name, ..} => name.lexeme.clone(),
 
-        Expression::Assign { name, value } => format!("(= {} {})", name.lexeme, print(value)),
+        Expression::Assign { name, value , ..} => format!("(= {} {})", name.lexeme, print(value)),
 
         Expression::Logical { left, operator, right } => format!("({} {} {})", operator.lexeme, print(left), print(right)),
 

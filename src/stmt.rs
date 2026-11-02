@@ -35,7 +35,6 @@ pub enum Stmt {
     Function(Rc<FunctionDecl>),
 
     Return {
-        #[allow(dead_code)]
         keyword: Token,
         value: Option<Expression>,
     }
