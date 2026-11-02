@@ -51,39 +51,45 @@ cargo test
     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.93s                                  
      Running unittests src\main.rs (target\debug\deps\lox-aee9884658ea698a.exe)
 
-running 77 tests
+running 98 tests
 test expression::tests::prints_nested_tree ... ok
-test interpreter::tests::assignment_is_an_expression ... ok
-test interpreter::tests::chained_assignment ... ok
-test interpreter::tests::clock_returns_a_number ... ok
-test interpreter::tests::arithmetic_and_precedence ... ok
-test interpreter::tests::environment_restored_after_error_in_block ... ok
-test interpreter::tests::equality ... ok
-test interpreter::tests::assigning_undeclared_variable_errors ... ok
-test interpreter::tests::calls_a_function_with_arguments ... ok
-test interpreter::tests::for_with_expression_initializer_uses_outer_var ... ok
-test interpreter::tests::initializer_can_read_other_variables ... ok
-test interpreter::tests::assignment_in_block_updates_outer ... ok
-test interpreter::tests::return_values_and_implicit_nil ... ok
-test interpreter::tests::display_strips_trailing_zero ... ok
 test interpreter::tests::assignment_updates_variable ... ok
-test interpreter::tests::calling_a_non_function_errors ... ok
-test interpreter::tests::error_in_while_condition_stops_the_loop ... ok
-test interpreter::tests::block_locals_disappear ... ok
-test interpreter::tests::for_loop_scopes_its_variable ... ok
-test interpreter::tests::fibonacci_from_the_book ... ok
-test interpreter::tests::functions_print_their_name ... ok
-test interpreter::tests::if_else_branches ... ok
-test interpreter::tests::comparison ... ok
+test interpreter::tests::assignment_in_block_updates_outer ... ok
+test interpreter::tests::arithmetic_and_precedence ... ok
+test interpreter::tests::closures_bind_to_the_variable_in_scope_when_declared ... ok
 test interpreter::tests::dangling_else_runs_correctly ... ok
-test interpreter::tests::nan_equals_itself_like_jlox ... ok
-test interpreter::tests::logical_short_circuits ... ok
-test interpreter::tests::closures_keep_their_environment ... ok
-test interpreter::tests::return_breaks_out_of_loops ... ok
-test interpreter::tests::environment_restored_after_return_from_block ... ok
-test interpreter::tests::runtime_errors ... ok
-test interpreter::tests::logical_returns_operands ... ok
+test interpreter::tests::assignment_in_a_closure_targets_the_right_scope ... ok
+test interpreter::tests::each_closure_gets_its_own_variables ... ok
+test interpreter::tests::calls_a_function_with_arguments ... ok
 test interpreter::tests::globals_can_be_redefined ... ok
+test interpreter::tests::clock_returns_a_number ... ok
+test interpreter::tests::comparison ... ok
+test interpreter::tests::fibonacci_from_the_book ... ok
+test interpreter::tests::assignment_is_an_expression ... ok
+test interpreter::tests::environment_restored_after_error_in_block ... ok
+test interpreter::tests::block_locals_disappear ... ok
+test interpreter::tests::environment_restored_after_return_from_block ... ok
+test interpreter::tests::error_in_while_condition_stops_the_loop ... ok
+test interpreter::tests::calling_a_non_function_errors ... ok
+test interpreter::tests::functions_print_their_name ... ok
+test interpreter::tests::for_loop_scopes_its_variable ... ok
+test interpreter::tests::global_functions_can_use_globals_defined_later ... ok
+test interpreter::tests::initializer_can_read_other_variables ... ok
+test interpreter::tests::if_else_branches ... ok
+test interpreter::tests::logical_returns_operands ... ok
+test interpreter::tests::closures_keep_their_environment ... ok
+test interpreter::tests::assigning_undeclared_variable_errors ... ok
+test interpreter::tests::display_strips_trailing_zero ... ok
+test interpreter::tests::equality ... ok
+test interpreter::tests::for_with_expression_initializer_uses_outer_var ... ok
+test interpreter::tests::locals_shadow_globals_inside_functions ... ok
+test interpreter::tests::chained_assignment ... ok
+test interpreter::tests::logical_short_circuits ... ok
+test interpreter::tests::nan_equals_itself_like_jlox ... ok
+test interpreter::tests::nested_closures_reach_outer_locals ... ok
+test interpreter::tests::return_breaks_out_of_loops ... ok
+test interpreter::tests::return_values_and_implicit_nil ... ok
+test interpreter::tests::runtime_errors ... ok
 test interpreter::tests::shadowing_does_not_leak ... ok
 test interpreter::tests::string_concat ... ok
 test interpreter::tests::truthiness ... ok
@@ -123,15 +129,29 @@ test parser::tests::parses_while ... ok
 test parser::tests::recovers_after_error_and_keepsparsing ... ok
 test parser::tests::unclosed_block_is_an_error ... ok
 test parser::tests::var_missing_name_is_error ... ok
+test resolver::tests::assignment_gets_resolved_too ... ok
+test resolver::tests::duplicate_local_is_an_error ... ok
+test parser::tests::too_many_arguments_is_an_error ... ok
+test resolver::tests::duplicate_parameters_are_an_error ... ok
+test resolver::tests::error_message_format_matches_jlox ... ok
+test resolver::tests::global_initializer_can_mention_itself ... ok
+test resolver::tests::globals_are_not_in_the_map ... ok
+test resolver::tests::globals_can_be_redeclared ... ok
+test resolver::tests::local_in_enclosing_scope_is_depth_one ... ok
+test resolver::tests::local_in_same_scope_is_depth_zero ... ok
+test resolver::tests::parameters_resolve_inside_the_body ... ok
+test resolver::tests::reading_local_in_its_own_initializer_is_an_error ... ok
+test resolver::tests::reports_every_error_not_just_the_first ... ok
+test resolver::tests::return_inside_a_function_is_fine ... ok
+test resolver::tests::shadowing_in_an_inner_scope_is_fine ... ok
+test resolver::tests::top_level_return_is_an_error ... ok
 test scanner::tests::reports_unterminated_string ... ok
 test scanner::tests::scans_number_with_value ... ok
-test parser::tests::too_many_arguments_is_an_error ... ok
 test scanner::tests::scans_single_char_operators ... ok
 test value::tests::matches_jlox_number_output ... ok
 test interpreter::tests::recursion_fib ... ok
 
-test result: ok. 77 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
-
+test result: ok. 98 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in0.12s
 
 ### Progress:
 - Chapter 4: Scanning - Completed
