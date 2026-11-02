@@ -48,11 +48,37 @@ impl Environment {
         }
 
         match &self.enclosing {
+
             Some(enclosing) => enclosing.borrow_mut().assign(name, value),
             None => Err(RuntimeError::new(
+
                 name, 
                 &format!("Undefined variable '{}'.", name.lexeme),
+
             ))
         }
     }
+
+    fn ancestor(env: &Rc<RefCell<Environment>>, distance: usize) -> Rc<RefCell<Environment>> {
+        let mut current = Rc::clone(env);
+
+        for _ in 0..distance {
+            let enclosing = current.borrow().enclosing.clone().expect("resolver said there was an enclosing scope");
+            current = enclosing;
+        }
+
+        current
+    }
+
+    pub fn get_at(env: &Rc<RefCell<Environment>>, distance: usize, name: &Token) -> Value {
+        let ancestor = Self::ancestor(env, distance);
+        let value = ancestor.borrow().values.get(&name.lexeme).cloned();
+
+        value.expect("resolver said this variable was here")
+    }
+
+    pub fn assign_at(env: &Rc<RefCell<Environment>>, distance: usize, name: &Token, value: Value) {
+
+        Self::ancestor(env, distance).borrow_mut().values.insert(name.lexeme.clone(), value);
+    } 
 }

@@ -7,6 +7,7 @@ mod value;
 mod interpreter;
 mod stmt;
 mod environment;
+mod resolver;
 
 
 
@@ -19,6 +20,7 @@ use std::thread;
 use scanner::Scanner;
 use parser::Parser;
 use interpreter::Interpreter;
+use resolver::Resolver;
 
 
 const STACK_SIZE: usize = 256 * 1024 * 1024;
@@ -83,6 +85,15 @@ fn run(source: String, interpreter: &mut Interpreter<io::Stdout>) -> Result<(), 
     let mut parser = Parser::new(tokens);
     //means the parser already printed the error lol
     let statements = parser.parse().map_err(|_| LoxError::Syntax)?;
+
+    let locals = Resolver::new().resolve(&statements).map_err(|errors| {
+        for err in errors {
+            eprintln!("{}", err);
+        }
+        LoxError::Syntax
+    })?;
+
+    interpreter.resolve(locals);
 
     interpreter.interpret(&statements).map_err(|err| {
         eprintln!("{}\n[line {}]", err.message, err.token.line);

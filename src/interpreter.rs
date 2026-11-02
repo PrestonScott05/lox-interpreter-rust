@@ -4,6 +4,7 @@ use crate::token_type::TokenType;
 use crate::value::{LoxFunction, NativeFunction, Value};
 use crate::stmt::{ Stmt};
 use crate::environment::Environment;
+use std::collections::HashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -50,6 +51,8 @@ fn clock(_args: &[Value]) -> Value {
 
 pub struct Interpreter<W: Write> {
     environment: Rc<RefCell<Environment>>,
+    globals: Rc<RefCell<Environment>>,
+    locals: HashMap<usize, usize>,
     out: W,
 }
 
@@ -69,9 +72,15 @@ impl<W: Write> Interpreter<W> {
         );
 
         Interpreter {
-            environment: globals,
+            environment: Rc::clone(&globals),
+            globals,
+            locals: HashMap::new(),
             out
         }
+    }
+
+    pub fn resolve(&mut self, locals: HashMap<usize, usize>) {
+        self.locals.extend(locals);
     }
     
     pub fn interpret(&mut self, statements: &[Stmt]) -> Result<(), RuntimeError> {
@@ -79,7 +88,7 @@ impl<W: Write> Interpreter<W> {
             match self.execute(stmt) {
                 Ok(()) => {}
                 Err(Unwind::Error(err)) => return Err(err),
-
+                //this can't happen anymore. 
                 Err(Unwind::Return(_)) => return Ok(()),
             }
         }
@@ -135,7 +144,7 @@ impl<W: Write> Interpreter<W> {
                 self.environment.borrow_mut().define(declaration.name.lexeme.clone(), Value::Function(Rc::new(function)));
             }
 
-            Stmt::Return { keyword, value } => {
+            Stmt::Return { value , ..} => {
                 let value = match value {
                     Some(expr) => self.evaluate(expr)?,
                     None => Value::Nil,
@@ -212,11 +221,17 @@ impl<W: Write> Interpreter<W> {
                 }
             }
 
-            Expression::Variable { name } => self.environment.borrow().get(name),
+            Expression::Variable { id, name } => self.look_up_variable(*id, name),
 
-            Expression::Assign { name, value } => {
+            Expression::Assign {id,  name, value } => {
                 let var = self.evaluate(value)?;
-                self.environment.borrow_mut().assign(name, var.clone())?;
+                
+                match self.locals.get(id) {
+                    Some(&distance) => Environment::assign_at(&self.environment, distance, name, var.clone()),
+
+                    None => self.globals.borrow_mut().assign(name, var.clone())?,
+                }
+
                 Ok(var)
             }
 
@@ -246,6 +261,14 @@ impl<W: Write> Interpreter<W> {
 
                 self.call(callee, args, paren)
             }
+        }
+    }
+
+    fn look_up_variable(&self, id: usize, name: &Token) -> Result<Value, RuntimeError> {
+        match self.locals.get(&id) {
+            Some(&distance) => Ok(Environment::get_at(&self.environment, distance, name)),
+
+            None => self.globals.borrow().get(name),
         }
     }
 
@@ -306,6 +329,7 @@ impl<W: Write> Interpreter<W> {
 mod tests {
     use super::*;
     use crate::parser::Parser;
+    use crate::resolver::Resolver;
     use crate::scanner::Scanner;
 
  
@@ -329,10 +353,19 @@ mod tests {
         Parser::new(tokens).parse().expect("parse failed")
     }
 
+    //paarse then resolve then run. 
+    fn load<W: Write>(interp: &mut Interpreter<W>, source: &str) -> Result<(), RuntimeError> {
+        let stmts = parse(source);
+        let locals = Resolver::new().resolve(&stmts).expect("resolve failed");
+
+        interp.resolve(locals);
+        interp.interpret(&stmts)
+    }
+
 fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
     let mut interp = Interpreter::new();
 
-    interp.interpret(&parse(program))?;
+    load(&mut interp, program)?;
 
     match parse(&format!("{expr};")).as_slice() {
 
@@ -474,19 +507,25 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
     #[test]
     fn environment_restored_after_error_in_block() {
         let mut interp = Interpreter::new();
-        let result = interp.interpret(&parse("var g = \"global\"; { var g = \"local\"; -\"oops\"; }"));
+
+        let result = load(&mut interp, "var g = \"global\"; { var g = \"local\"; -\"oops\"; }");
+
         assert!(result.is_err());
+
         match parse("g;").as_slice() {
+        
             [Stmt::Expression(e)] => {
                 assert_eq!(interp.evaluate(e).unwrap(), Value::Str("global".into()))
             }
+        
             other => panic!("{other:?}"),
         }
     }
 
     fn run_script(source: &str) -> String {
         let mut interpreter = Interpreter::with_output(Vec::new());
-        interpreter.interpret(&parse(source)).expect("runtime error");
+        
+        load(&mut interpreter, source).expect("runtime error");
 
         String::from_utf8(interpreter.out).unwrap()
     }
@@ -597,7 +636,7 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
     #[test]
     fn error_in_while_condition_stops_the_loop() {
         let mut interp = Interpreter::with_output(Vec::new());
-        let result = interp.interpret(&parse("while (-\"x\") print 1;"));
+        let result = load(&mut interp, "while (-\"x\") print 1;");
         assert_eq!(result.unwrap_err().message, "Operand must be a number.");
     }
 
@@ -698,6 +737,95 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
     fn wrong_argument_count_errors() {
         let e = run_then_eval("fun f(a, b) {}", "f(1)").unwrap_err();
         assert_eq!(e.message, "Expected 2 arguments but got 1.");
+    }
+
+        #[test]
+    fn closures_bind_to_the_variable_in_scope_when_declared() {
+        //the books example. also, do you like my script runner? this was a fun side challenge
+        check_script(r#"
+            var a = "global";
+            {
+                fun showA() {
+                    print a;
+                }
+                showA(); // expect: global
+                var a = "block";
+                showA(); // expect: global
+            }
+        "#);
+    }
+
+    #[test]
+    fn assignment_in_a_closure_targets_the_right_scope() {
+        check_script(r#"
+            var a = "global";
+            {
+                fun set() { a = "assigned"; }
+                var a = "block";
+                set();
+                print a; // expect: block
+            }
+            print a; // expect: assigned
+        "#);
+    }
+
+    #[test]
+    fn locals_shadow_globals_inside_functions() {
+        check_script(r#"
+            var a = "global";
+            fun f() {
+                var a = "local";
+                print a; // expect: local
+            }
+            f();
+            print a; // expect: global
+        "#);
+    }
+
+    #[test]
+    fn nested_closures_reach_outer_locals() {
+        check_script(r#"
+            fun outer() {
+                var x = "outer";
+                fun middle() {
+                    fun inner() {
+                        print x;
+                    }
+                    return inner;
+                }
+                return middle();
+            }
+            outer()(); // expect: outer
+        "#);
+    }
+
+    #[test]
+    fn each_closure_gets_its_own_variables() {
+        check_script(r#"
+            fun makeCounter() {
+                var i = 0;
+                fun count() {
+                    i = i + 1;
+                    return i;
+                }
+                return count;
+            }
+            var a = makeCounter();
+            var b = makeCounter();
+            a();
+            a();
+            print a(); // expect: 3
+            print b(); // expect: 1
+        "#);
+    }
+
+    #[test]
+    fn global_functions_can_use_globals_defined_later() {
+        check_script(r#"
+            fun show() { print later; }
+            var later = "defined after";
+            show(); // expect: defined after
+        "#);
     }
 
 }

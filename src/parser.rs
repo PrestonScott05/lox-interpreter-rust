@@ -1,6 +1,6 @@
 use crate::token::{Literal, Token};
 use crate::token_type::TokenType;
-use crate::expression::Expression;
+use crate::expression::{Expression, next_id};
 use crate::stmt::{Stmt, FunctionDecl};
 use std::rc::Rc;
 
@@ -268,7 +268,8 @@ impl Parser {
             let value = self.assignment()?; //recurse!
 
             return match expr {
-                Expression::Variable { name } => Ok(Expression::Assign {
+                Expression::Variable { id, name } => Ok(Expression::Assign {
+                    id,
                     name,
                     value: Box::new(value),
                 }),
@@ -534,6 +535,7 @@ impl Parser {
 
         if self.match_token(&[TokenType::Identifier]) {
             return Ok(Expression::Variable {
+                id: next_id(),
                 name: self.previous()
             });
         }

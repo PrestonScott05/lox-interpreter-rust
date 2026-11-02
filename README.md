@@ -8,12 +8,7 @@ My interpreter follows the interpreter written in java at www.craftinginterprete
 Note: Also, using cargo fmt, you can get some nice code conventions. While reviewing code, if lines are smushed, that's why!
 
 ### Where I'm at:
-Chapter 10 (Functions) is complete on top of Chapter 9's control flow (if/else, the short-circuiting `and`/`or`, and `while`/`for` loops), the interpreter now supports function calls, and a native `clock()` function, as specified in Crafting Interpreters.
-
-Rust-specific notes:
-- The book handles `return` by throwing an exception. Rust has no exceptions, so `execute` returns an `Unwind` enum (`Error` or `Return`), and `?` carries a return up to the function call that catches it.
-- Every Lox call goes through several Rust stack frames, so the interpreter runs on a thread with a 256 MB stack. This lets deep recursion like "sum(5000)" work instead of overflowing the default 1 MB stack which I had some serious debugging issues with....
-
+Chapter 11 (Resolving and Binding) is complete. On top of Chapter 10's functions, closures, and native `clock()`, a resolver pass now runs between parsing and interpreting. It binds every local variable to the scope it was declared in, so closures keep the right variables, and it reports compile errors for reading a local in its own initializer, redeclaring a local, and `return` at the top level.
 ### File Structure
 
  - lox-interpreter-rust/
@@ -30,6 +25,7 @@ Rust-specific notes:
          - interpreter.rs  # Interpreter: evaluates an Expression to a Value; RuntimeError (Ch. 7)
          - stmt.rs # Statement:..
          - environment.rs #...
+         - resolver.rs #...
 
 **Pipeline:** source text → `Scanner` → tokens → `Parser` → `Expression` (AST) → `Interpreter` → `Value`
 
@@ -47,7 +43,7 @@ Or start the interactive REPL (no arguments):
 ### Test
 cargo test
 
-***SOME TESTS WERE WRITTEN WITH THE ASSISTANCE OF CLAUDE SONNET 5***
+***SOME TESTS AND BLOCKS OF CODE THAT WERE UNABLE TO BE TRANSLATED WERE WRITTEN WITH THE ASSISTANCE OF CLAUDE SONNET 5***
 
 #### Test Output: 
 cargo test
@@ -145,5 +141,6 @@ test result: ok. 77 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 - Chapter 8: statements - Completed
 - Chapter 9: Control Flow - Completed
 - Chapter 10: Functions - Completed
-- Next: Chapter 11!
+- Chapter 11: Resolving and Binding - Completedd
+- Next: Chapter 12!
 
