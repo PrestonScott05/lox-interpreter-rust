@@ -41,6 +41,7 @@ pub enum Stmt {
 
     Class {
         name: Token,
+        superclass: Option<Expression>,
         methods: Vec<Rc<FunctionDecl>>,
     }
 }

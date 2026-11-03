@@ -32,6 +32,7 @@ enum FunctionType {
 enum ClassType {
     None,
     Class,
+    Subclass,
 }
 
 //thiswalks the tree once before running it, and figures out how many scopes away each local variable lives.
@@ -105,12 +106,29 @@ impl Resolver {
                 self.resolve_function(decl, FunctionType::Function);
             }
 
-            Stmt::Class { name, methods } => {
+            Stmt::Class { name, superclass, methods } => {
                 let enclosing_class = self.current_class;
                 self.current_class = ClassType::Class;
 
                 self.declare(name);
                 self.define(name);
+
+                if let Some(superclass) = superclass {
+                    if let Expression::Variable {name: super_name, ..} = superclass {
+                        if super_name.lexeme == name.lexeme {
+                            self.error(super_name, "A class can't inherit from itself.");
+                        }
+                    }
+
+                    self.current_class = ClassType::Subclass;
+
+                    self.resolve_expr(superclass);
+
+                    self.begin_scope();
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.insert("super".to_string(), true);
+                    }
+                }
 
                 self.begin_scope();
                 if let Some(scope) = self.scopes.last_mut() {
@@ -127,6 +145,11 @@ impl Resolver {
                 }
 
                 self.end_scope();
+
+                if superclass.is_some() {
+                    self.end_scope();
+                }
+
                 self.current_class = enclosing_class;
             }
 
@@ -226,6 +249,16 @@ impl Resolver {
                 if self.current_class == ClassType::None {
                     self.error(keyword, "Can't use 'this' outside of a class.");
                     return;
+                }
+
+                self.resolve_local(*id, keyword);
+            }
+
+            Expression::Super {id, keyword, ..} => {
+                match self.current_class {
+                    ClassType::None => self.error(keyword, "Can't use 'super' outside of a class."),
+                    ClassType::Class => self.error(keyword, "Can't use 'super' in a class with no superclass."),
+                    ClassType::Subclass => {}
                 }
 
                 self.resolve_local(*id, keyword);
@@ -482,5 +515,44 @@ mod tests {
     fn this_resolves_one_scope_above_the_method_body() {
   
         assert_eq!(resolve_depths("class A { m() { return this; } }"), vec![1]);
+    }
+
+        #[test]
+    fn class_cant_inherit_from_itself() {
+        
+        assert_eq!(resolve_errors("class Oops < Oops {}"), vec!["A class can't inherit from itself."]);
+    }
+
+
+    #[test]
+    fn super_outside_a_class_is_an_error() {
+        assert_eq!(
+            
+            resolve_errors("super.notEvenInAClass();"),
+            
+            vec!["Can't use 'super' outside of a class."]
+        );
+    }
+
+    #[test]
+    fn super_without_a_superclass_is_an_error() {
+        assert_eq!(
+    
+            resolve_errors("class Eclair { cook() { super.cook(); } }"),
+    
+            vec!["Can't use 'super' in a class with no superclass."]
+        );
+    }
+
+    #[test]
+    fn super_in_a_subclass_is_fine() {
+        assert!(resolve_errors("class A { m() {} } class B < A { m() { super.m(); } }").is_empty());
+    
+    }
+
+    #[test]
+    fn super_resolves_two_scopes_above_the_method_body() {
+    
+        assert_eq!(resolve_depths("class A {} class B < A { m() { return super.m; } }"), vec![2]);
     }
 }
