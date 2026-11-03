@@ -37,6 +37,11 @@ pub enum Stmt {
     Return {
         keyword: Token,
         value: Option<Expression>,
+    },
+
+    Class {
+        name: Token,
+        methods: Vec<Rc<FunctionDecl>>,
     }
 }
 

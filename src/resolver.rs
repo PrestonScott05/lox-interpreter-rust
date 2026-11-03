@@ -24,6 +24,14 @@ impl fmt::Display for ResolveError {
 enum FunctionType {
     None,
     Function,
+    Initializer,
+    Method,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ClassType {
+    None,
+    Class,
 }
 
 //thiswalks the tree once before running it, and figures out how many scopes away each local variable lives.
@@ -32,6 +40,7 @@ pub struct Resolver {
     scopes: Vec<HashMap<String, bool>>,
     locals: HashMap<usize, usize>,
     current_function: FunctionType,
+    current_class: ClassType,
     errors: Vec<ResolveError>,
 }
 
@@ -41,6 +50,7 @@ impl Resolver {
             scopes: Vec::new(),
             locals: HashMap::new(),
             current_function: FunctionType::None,
+            current_class: ClassType::None,
             errors: Vec::new(),
         }
     }
@@ -95,6 +105,31 @@ impl Resolver {
                 self.resolve_function(decl, FunctionType::Function);
             }
 
+            Stmt::Class { name, methods } => {
+                let enclosing_class = self.current_class;
+                self.current_class = ClassType::Class;
+
+                self.declare(name);
+                self.define(name);
+
+                self.begin_scope();
+                if let Some(scope) = self.scopes.last_mut() {
+                    scope.insert("this".to_string(), true);
+                }
+
+                for method in methods {
+                    let kind = if method.name.lexeme == "init" {
+                        FunctionType::Initializer
+                    } else {
+                        FunctionType::Method
+                    };
+                    self.resolve_function(method, kind)
+                }
+
+                self.end_scope();
+                self.current_class = enclosing_class;
+            }
+
             Stmt::Expression(expr) | Stmt::Print(expr) => self.resolve_expr(expr),
 
             Stmt::If { condition, then_branch, else_branch } => {
@@ -126,6 +161,10 @@ impl Resolver {
 
                 if let Some(value) = value {
                     
+                    if self.current_function == FunctionType::Initializer {
+                        self.error(keyword, "Can't return a value from an initializer.");
+                    }
+
                     self.resolve_expr(value);
                 
                 }
@@ -175,6 +214,22 @@ impl Resolver {
             Expression::Unary { right, .. } => self.resolve_expr(right),
 
             Expression::Literal { .. } => {}
+
+            Expression::Get {object, ..} => self.resolve_expr(object),
+
+            Expression::Set {object, value, ..} => {
+                self.resolve_expr(value);
+                self.resolve_expr(object);
+            },
+
+            Expression::This {id, keyword } => {
+                if self.current_class == ClassType::None {
+                    self.error(keyword, "Can't use 'this' outside of a class.");
+                    return;
+                }
+
+                self.resolve_local(*id, keyword);
+            }
         }
     }
 
@@ -375,5 +430,57 @@ mod tests {
             errors[0].to_string(),
             "[line 2] Error at 'a': Already a variable with this name in this scope."
         );
+    }
+
+        #[test]
+    fn this_at_top_level_is_an_error() {
+        assert_eq!(resolve_errors("print this;"), vec!["Can't use 'this' outside of a class."]);
+    }
+
+    #[test]
+    fn this_in_a_plain_function_is_an_error() {
+        assert_eq!(
+            resolve_errors("fun notAMethod() { print this; }"),
+            vec!["Can't use 'this' outside of a class."]
+        );
+    }
+
+    #[test]
+    fn this_inside_a_method_is_fine() {
+        assert!(resolve_errors("class A { m() { return this; } }").is_empty());
+    }
+
+    #[test]
+    fn this_in_a_function_nested_in_a_method_is_fine() {
+        assert!(resolve_errors("class A { m() { fun f() { return this; } return f; } }").is_empty());
+    }
+
+    #[test]
+    fn returning_a_value_from_init_is_an_error() {
+        assert_eq!(
+            resolve_errors("class Foo { init() { return \"something else\"; } }"),
+            vec!["Can't return a value from an initializer."]
+        );
+    }
+
+    #[test]
+    fn bare_return_in_init_is_fine() {
+        assert!(resolve_errors("class Foo { init() { return; } }").is_empty());
+    }
+
+    #[test]
+    fn returning_a_value_from_a_normal_method_is_fine() {
+        assert!(resolve_errors("class A { m() { return 1; } }").is_empty());
+    }
+
+    #[test]
+    fn plain_function_named_init_can_return_a_value() {
+        assert!(resolve_errors("fun init() { return 1; }").is_empty());
+    }
+
+    #[test]
+    fn this_resolves_one_scope_above_the_method_body() {
+  
+        assert_eq!(resolve_depths("class A { m() { return this; } }"), vec![1]);
     }
 }

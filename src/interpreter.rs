@@ -1,9 +1,10 @@
 use crate::expression::{Expression};
 use crate::token::Token;
 use crate::token_type::TokenType;
-use crate::value::{LoxFunction, NativeFunction, Value};
+use crate::value::{LoxFunction, NativeFunction, Value, LoxClass, LoxInstance};
 use crate::stmt::{ Stmt};
 use crate::environment::Environment;
+
 use std::collections::HashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -139,9 +140,31 @@ impl<W: Write> Interpreter<W> {
                 let function = LoxFunction {
                     declaration: Rc::clone(declaration),
                     closure: Rc::clone(&self.environment),
+                    is_initializer: false,
                 };
 
                 self.environment.borrow_mut().define(declaration.name.lexeme.clone(), Value::Function(Rc::new(function)));
+            }
+
+            Stmt::Class { name , methods } => {
+                let mut method_table = HashMap::new();
+
+                for method in methods {
+                    let function = LoxFunction {
+                        declaration: Rc::clone(method),
+                        closure: Rc::clone(&self.environment),
+                        is_initializer: method.name.lexeme == "init",
+                    };
+
+                    method_table.insert(method.name.lexeme.clone(), Rc::new(function));
+                }
+
+                let class = LoxClass {
+                    name: name.lexeme.clone(),
+                    methods: method_table
+                };
+
+                self.environment.borrow_mut().define(name.lexeme.clone(), Value::Class(Rc::new(class)));
             }
 
             Stmt::Return { value , ..} => {
@@ -261,6 +284,27 @@ impl<W: Write> Interpreter<W> {
 
                 self.call(callee, args, paren)
             }
+
+            Expression::Get {object, name} => {
+                match self.evaluate(object)? {
+                    Value::Instance(instance) => LoxInstance::get(&instance, name),
+
+                    _ => Err(RuntimeError::new(name, "Only instances have properties.")),
+                }
+            },
+
+            Expression::Set {object, name, value} => {
+                let Value::Instance(instance) = self.evaluate(object)? else {
+                    return Err(RuntimeError::new(name, "Only instances have fields."));
+                };
+
+                let value = self.evaluate(value)?;
+                instance.borrow_mut().set(name, value.clone());
+
+                Ok(value)
+            }
+
+            Expression::This {id, keyword} => self.look_up_variable(*id, keyword)
         }
     }
 
@@ -282,19 +326,49 @@ impl<W: Write> Interpreter<W> {
             Value::Function(function) => {
                 Self::check_arity(function.declaration.params.len(), args.len(), paren)?;
 
-                let mut env = Environment::new_enclosed(Rc::clone(&function.closure));
+                self.call_function(&function, args)
+            }
 
-                for (param, arg) in function.declaration.params.iter().zip(args) {
-                    env.define(param.lexeme.clone(), arg);
+            Value::Class(class) => {
+                let initializer = class.find_method("init");
+
+                let arity = initializer.as_ref().map_or(0, |init| init.declaration.params.len());
+
+                Self::check_arity(arity, args.len(), paren)?;
+
+                let instance = Rc::new(RefCell::new(LoxInstance {
+                    class: Rc::clone(&class),
+                    fields: HashMap::new(),
+                }));
+
+                if let Some(init) = initializer {
+                    self.call_function(&init.bind(Rc::clone(&instance)), args)?;
                 }
 
-                 match self.execute_block(&function.declaration.body, Rc::new(RefCell::new(env))) {
-                    Ok(()) => Ok(Value::Nil),
-                    Err(Unwind::Return(value)) => Ok(value),
-                    Err(Unwind::Error(err)) => Err(err),
-                }
+                Ok(Value::Instance(instance))
             }
             _ => Err(RuntimeError::new(paren, "Can only call functions and classes.")),
+        }
+    }
+
+    fn call_function(&mut self, function: &LoxFunction, args: Vec<Value>) -> Result<Value, RuntimeError> {
+        let mut env = Environment::new_enclosed(Rc::clone(&function.closure));
+
+        for (param, arg) in function.declaration.params.iter().zip(args) {
+            env.define(param.lexeme.clone(), arg);
+        }
+
+        let result = self.execute_block(&function.declaration.body, Rc::new(RefCell::new(env)));
+
+
+        match result {
+            Ok(()) | Err(Unwind::Return(_)) if function.is_initializer => {
+                Ok(Environment::get_at_name(&function.closure, 0, "this"))
+            }
+
+            Ok(()) => Ok(Value::Nil),
+            Err(Unwind::Return(value)) => Ok(value),
+            Err(Unwind::Error(err)) => Err(err),
         }
     }
 
@@ -826,6 +900,255 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
             var later = "defined after";
             show(); // expect: defined after
         "#);
+    }
+
+        #[test]
+    fn prints_classes_and_instances() {
+
+        check_script(r#"
+            class DevonshireCream {
+                serveOn() { return "Scones"; }
+            }
+            print DevonshireCream; // expect: DevonshireCream
+
+            class Bagel {}
+
+            var bagel = Bagel();
+
+            print bagel; // expect: Bagel instance
+        "#);
+
+    }
+
+    #[test]
+    fn fields_can_be_set_and_read() {
+
+        check_script(r#"
+            class Box {}
+            var box = Box();
+            
+            box.contents = "cat";
+            print box.contents; // expect: cat
+            
+            box.contents = "dog";
+            print box.contents; // expect: dog
+        "#);
+    }
+
+    #[test]
+    fn set_is_an_expression() 
+    {
+        check_script(r#"
+            class Box {}
+            var box = Box();
+            print box.x = 3; // expect: 3
+        "#);
+    }
+
+    #[test]
+    fn methods_can_be_called() {
+
+        check_script(r#"
+            class Bacon {
+                eat() {
+                    print "Crunch crunch crunch!";
+                }
+            }
+            Bacon().eat(); // expect: Crunch crunch crunch!
+        "#);
+
+    }
+
+    #[test]
+    fn this_reads_fields_on_the_instance() {
+
+        check_script(r#"
+            class Cake {
+                taste() {
+                    var adjective = "delicious";
+                    print "The " + this.flavor + " cake is " + adjective + "!";
+                }
+            }
+            var cake = Cake();
+
+            cake.flavor = "German chocolate";
+
+            cake.taste(); // expect: The German chocolate cake is delicious!
+        "#);
+    }
+
+    #[test]
+    fn bound_methods_remember_their_instance() {
+        check_script(r#"
+            class Person {
+                sayName() {
+                    print this.name;
+                }
+            }
+            var jane = Person();
+            jane.name = "Jane";
+
+            var bill = Person();
+            bill.name = "Bill";
+
+            var method = jane.sayName;
+            method(); // expect: Jane
+
+            bill.sayName = jane.sayName;
+            bill.sayName(); // expect: Jane
+        "#);
+    }
+
+    #[test]
+    fn this_inside_a_closure_inside_a_method() {
+        check_script(r#"
+            class Thing {
+                getCallback() {
+                    fun localFunction() {
+                        print this;
+                    }
+                    return localFunction;
+                }
+            }
+            var callback = Thing().getCallback();
+            callback(); // expect: Thing instance
+        "#);
+    }
+
+    #[test]
+    fn functions_stored_in_fields_can_be_called() {
+        check_script(r#"
+            class Box {}
+            fun notMethod(argument) {
+                print "called function with " + argument;
+            }
+           
+            var box = Box();
+           
+            box.function = notMethod;
+            box.function("argument"); // expect: called function with argument
+        "#);
+    }
+
+    #[test]
+    fn fields_shadow_methods() {
+        check_script(r#"
+            class A {
+                m() { return "method"; }
+            }
+           
+            var a = A();
+            print a.m(); // expect: method
+           
+            a.m = "field";
+            print a.m; // expect: field
+        "#);
+    }
+
+    #[test]
+    fn methods_can_refer_to_their_own_class() {
+        check_script(r#"
+            class Node {
+                make() { return Node(); }
+            }
+           
+            print Node().make(); // expect: Node instance
+        "#);
+    }
+
+    #[test]
+    fn init_runs_with_arguments() {
+        check_script(r#"
+            class Point {
+                init(x, y) {
+                    this.x = x;
+                    this.y = y;
+                }
+                sum() { return this.x + this.y; }
+            }
+           
+            var p = Point(1, 2);
+            print p.sum(); // expect: 3
+        "#);
+    }
+
+    #[test]
+    fn calling_init_directly_returns_this() {
+        check_script(r#"
+            class Foo {
+                init() {
+                    print "init";
+                }
+            }
+           
+            var foo = Foo(); // expect: init
+            print foo.init(); // expect: init
+           
+            // expect: Foo instance
+        "#);
+    }
+
+    #[test]
+    fn early_return_in_init_still_returns_this() {
+        check_script(r#"
+            class Foo {
+                init(early) {
+                    if (early) return;
+                    this.done = true;
+                }
+            }
+           
+            print Foo(true); // expect: Foo instance
+            print Foo(false).done; // expect: true
+        "#);
+    }
+
+    #[test]
+    fn plain_function_named_init_is_not_special() {
+        check_script(r#"
+           
+            fun init() { return 1; }
+           
+            print init(); // expect: 1
+        "#);
+    }
+
+
+    #[test]
+    fn instances_and_classes_compare_by_identity() {
+        check_script(r#"
+            class A {}
+    
+            var a = A();
+            var b = A();
+    
+            print a == a; // expect: true
+            print a == b; // expect: false
+    
+            print A == A; // expect: true
+        "#);
+    }
+
+    #[test]
+    fn property_runtime_errors() {
+    
+        assert_eq!(run_then_eval("var x = 1;", "x.y").unwrap_err().message, "Only instances have properties.");
+    
+        assert_eq!(run_then_eval("var x = 1;", "x.y = 2").unwrap_err().message, "Only instances have fields.");
+    
+        assert_eq!(run_then_eval("class A {}", "A().nope").unwrap_err().message, "Undefined property 'nope'.");
+    }
+
+    #[test]
+    fn set_checks_the_object_before_evaluating_the_value() {
+    
+        assert_eq!(run_then_eval("var x = 1;", "x.y = nope").unwrap_err().message, "Only instances have fields.");
+    }
+
+    #[test]
+    fn class_arity_comes_from_init() {
+        assert_eq!(run_then_eval("class A {}", "A(1)").unwrap_err().message, "Expected 0 arguments but got 1.");
+        assert_eq!(run_then_eval("class P { init(x) {} }", "P()").unwrap_err().message, "Expected 1 arguments but got 0.");
     }
 
 }
