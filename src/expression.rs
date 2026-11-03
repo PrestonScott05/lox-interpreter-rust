@@ -1,5 +1,6 @@
 use crate::token::Literal;
 use crate::token::Token;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 
@@ -46,6 +47,22 @@ pub enum Expression {
         callee: Box<Expression>, paren: Token, arguments: Vec<Expression> 
     },
 
+    Get {
+        object: Box<Expression>,
+        name: Token,
+    },
+
+    Set {
+        object: Box<Expression>,
+        name: Token,
+        value: Box<Expression> 
+    },
+
+    This {
+        id: usize,
+        keyword: Token
+    }
+
 }
 
 //we can actually use match the correct way bc rust is great. this means we can skip almost all of chapter 5 (i found this out after doing it all...)
@@ -77,7 +94,13 @@ pub fn print(expr: &Expression) -> String {
             let args: Vec<String> = arguments.iter().map(print).collect();
 
             format!("(call {} {})", print(callee), args.join(" "))
-        }
+        },
+
+        Expression::Get { object, name } => format!("(. {} {})", print(object), name.lexeme),
+
+        Expression::Set { object, name, value } => format!("(= (. {} {}) {})", print(object), name.lexeme, print(value)),
+
+        Expression::This { ..} => "this".to_string(),
     }
 }
 

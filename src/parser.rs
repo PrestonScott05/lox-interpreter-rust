@@ -44,8 +44,10 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> Option<Stmt> {
-        let result = if self.match_token(&[TokenType::Fun]) {
-            self.function("function")
+        let result = if self.match_token(&[TokenType::Class]) {
+            self.class_declaration()
+        } else if self.match_token(&[TokenType::Fun]) {
+            self.function("function").map(Stmt::Function)
         } else if self.match_token(&[TokenType::Var]) {
             self.var_declaration()
         } else {
@@ -63,7 +65,24 @@ impl Parser {
         }
     }
 
-    fn function(&mut self, kind: &str) -> Result<Stmt, ParseError> {
+    fn class_declaration(&mut self) -> Result<Stmt, ParseError> {
+        let name = self.consume(TokenType::Identifier, "Expect class name.")?;
+        
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
+        
+        let mut methods = Vec::new();
+
+        while !self.check(TokenType::RightBrace) && !self.is_at_end() {
+            methods.push(self.function("method")?);
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
+
+        Ok(Stmt::Class {name, methods})
+    }
+
+
+    fn function(&mut self, kind: &str) -> Result<Rc<FunctionDecl>, ParseError> {
         let name = self.consume(TokenType::Identifier, &format!("Expect {kind} name."))?;
 
         self.consume(TokenType::LeftParen, &format!{"Expect '(' after {kind} name."})?;
@@ -91,7 +110,7 @@ impl Parser {
         self.consume(TokenType::LeftBrace, &format!("Expect '{{' before {kind} body."))?;
         let body = self.block()?;
 
-        Ok(Stmt::Function(Rc::new(FunctionDecl { name, params, body })))
+        Ok(Rc::new(FunctionDecl { name, params, body }))
     }
 
     fn var_declaration(&mut self) -> Result<Stmt, ParseError> {
@@ -272,6 +291,12 @@ impl Parser {
                     id,
                     name,
                     value: Box::new(value),
+                }),
+
+                Expression::Get { object, name } => Ok(Expression::Set {
+                    object,
+                    name,
+                    value: Box::new(value)
                 }),
 
                 other => {
@@ -480,7 +505,12 @@ impl Parser {
         loop {
             if self.match_token(&[TokenType::LeftParen]) {
                 expr = self.finish_call(expr)?;
-            } else {
+            } else if self.match_token(&[TokenType::Dot]) {
+                let name = self.consume(TokenType::Identifier, "Expect property name after '.'.")?;
+
+                expr = Expression::Get {object: Box::new(expr), name};
+            } 
+            else {
                 break;
             }
         }
@@ -523,6 +553,13 @@ impl Parser {
         if self.match_token(&[TokenType::Nil]) {
             return Ok(Expression::Literal {
                 value: Literal::Nil
+            });
+        }
+
+        if self.match_token(&[TokenType::This]) {
+            return Ok(Expression::This {
+                id: next_id(),
+                keyword: self.previous(),
             });
         }
 
@@ -807,5 +844,71 @@ mod tests {
             [Stmt::Function(decl)] => assert!(matches!(decl.body.as_slice(), [Stmt::Return { value: None, .. }])),
             other => panic!("{other:?}"),
         }
+    }
+
+        #[test]
+    fn parses_class_with_methods() {
+       
+        let stmts = parse_program("class Breakfast { cook() { print 1; } serve(who) { print who; } }").unwrap();
+        match stmts.as_slice() {
+            
+            [Stmt::Class { name, methods }] => {
+                
+                assert_eq!(name.lexeme, "Breakfast");
+                
+                let names: Vec<&str> = methods.iter().map(|m| m.name.lexeme.as_str()).collect();
+                
+                
+                assert_eq!(names, vec!["cook", "serve"]);
+                
+                assert_eq!(methods[1].params.len(), 1);
+            }
+            other => panic!("expected a class, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_empty_class() {
+        
+        let stmts = parse_program("class Bagel {}").unwrap();
+        
+        assert!(matches!(stmts.as_slice(), [Stmt::Class { methods, .. }] if methods.is_empty()));
+    }
+
+    #[test]
+    fn parses_get_chains_and_method_calls() {
+        
+        assert_eq!(parse_to_string("a.b.c"), "(. (. a b) c)");
+        
+        assert_eq!(parse_to_string("a.b(1).c"), "(. (call (. a b) 1) c)");
+    }
+
+    #[test]
+    fn property_assignment_becomes_set() {
+        
+        assert_eq!(parse_to_string("a.b = 1"), "(= (. a b) 1)");
+        
+        assert_eq!(parse_to_string("a.b.c = 1"), "(= (. (. a b) c) 1)");
+    }
+
+    #[test]
+    fn call_result_is_not_an_assignment_target() {
+        assert_eq!(parse_source("a.b() = 1").unwrap_err()[0].message, "Invalid assignment target.");
+    }
+
+    #[test]
+    fn parses_this() {
+        assert_eq!(parse_to_string("this.x"), "(. this x)");
+    }
+
+    #[test]
+    fn class_syntax_errors() {
+        assert_eq!(parse_program("class { }").unwrap_err()[0].message, "Expect class name.");
+        
+        assert_eq!(parse_program("class A").unwrap_err()[0].message, "Expect '{' before class body.");
+        
+        assert_eq!(parse_program("class A { m() {}").unwrap_err()[0].message, "Expect '}' after class body.");
+        
+        assert_eq!(parse_program("a.;").unwrap_err()[0].message, "Expect property name after '.'.");
     }
 }

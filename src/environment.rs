@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use std::collections::HashMap;
+
 use crate::interpreter::RuntimeError;
 use crate::token::Token;
 use crate::value::Value;
@@ -71,8 +72,12 @@ impl Environment {
     }
 
     pub fn get_at(env: &Rc<RefCell<Environment>>, distance: usize, name: &Token) -> Value {
+        Self::get_at_name(env, distance, &name.lexeme)
+    }
+
+    pub fn get_at_name(env: &Rc<RefCell<Environment>>, distance: usize, name: &str) -> Value {
         let ancestor = Self::ancestor(env, distance);
-        let value = ancestor.borrow().values.get(&name.lexeme).cloned();
+        let value = ancestor.borrow().values.get(name).cloned();
 
         value.expect("resolver said this variable was here")
     }
