@@ -5,6 +5,7 @@ use crate::stmt::{Stmt, FunctionDecl};
 use std::rc::Rc;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ParseError {
     pub token: Token,
     pub message: String,
