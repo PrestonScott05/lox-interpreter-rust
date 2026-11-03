@@ -61,7 +61,15 @@ pub enum Expression {
     This {
         id: usize,
         keyword: Token
+    },
+
+    Super {
+        id: usize,
+        keyword: Token,
+        method: Token,
     }
+
+
 
 }
 
@@ -101,6 +109,8 @@ pub fn print(expr: &Expression) -> String {
         Expression::Set { object, name, value } => format!("(= (. {} {}) {})", print(object), name.lexeme, print(value)),
 
         Expression::This { ..} => "this".to_string(),
+
+        Expression::Super {method, ..} => format!("(super {})", method.lexeme),
     }
 }
 

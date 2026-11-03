@@ -146,13 +146,55 @@ impl<W: Write> Interpreter<W> {
                 self.environment.borrow_mut().define(declaration.name.lexeme.clone(), Value::Function(Rc::new(function)));
             }
 
-            Stmt::Class { name , methods } => {
+            Stmt::Class { name, superclass, methods } => {
+                let superclass = match superclass {
+                    Some(expr) => match self.evaluate(expr)? {
+                        Value::Class(class) => Some(class),
+                        _ => {
+                        
+                            let token = match expr {
+                                
+                                Expression::Variable {
+                                
+                                    name: super_name, 
+                                    ..
+                                
+                                } => super_name,
+                                
+                                _ => name,
+                            };
+
+                            
+                            return Err(RuntimeError::new(token, "Superclass must be a class.").into());
+                        
+                        }
+
+
+                    },
+                    None => None,
+                };
+                
+                let method_closure = match &superclass {
+                    Some(superclass) => {
+                        let mut env = Environment::new_enclosed(Rc::clone(&self.environment));
+
+                        env.define("super".to_string(), Value::Class(Rc::clone(superclass)));
+
+                        Rc::new(RefCell::new(env))
+                    }
+
+                    None => Rc::clone(&self.environment)
+                };
+
                 let mut method_table = HashMap::new();
 
                 for method in methods {
                     let function = LoxFunction {
+                        
                         declaration: Rc::clone(method),
-                        closure: Rc::clone(&self.environment),
+                        
+                        closure: Rc::clone(&method_closure),
+                        
                         is_initializer: method.name.lexeme == "init",
                     };
 
@@ -161,6 +203,7 @@ impl<W: Write> Interpreter<W> {
 
                 let class = LoxClass {
                     name: name.lexeme.clone(),
+                    superclass,
                     methods: method_table
                 };
 
@@ -304,7 +347,27 @@ impl<W: Write> Interpreter<W> {
                 Ok(value)
             }
 
-            Expression::This {id, keyword} => self.look_up_variable(*id, keyword)
+           Expression::This {id, keyword} => self.look_up_variable(*id, keyword),
+
+            Expression::Super { id, method, .. } => {
+                let distance = *self.locals.get(id).expect("the resolver always resolves super");
+
+                let Value::Class(superclass) = Environment::get_at_name(&self.environment, distance, "super") else {
+                    unreachable!("super is always bound to a class");
+                };
+
+                
+                let Value::Instance(object) = Environment::get_at_name(&self.environment, distance - 1, "this") else {
+                    unreachable!("this is always bound to an instance");
+                };
+
+                match superclass.find_method(&method.lexeme) {
+                    
+                    Some(found) => Ok(Value::Function(found.bind(object))),
+                    
+                    None => Err(RuntimeError::new(method, &format!("Undefined property '{}'.", method.lexeme))),
+                }
+            }
         }
     }
 
@@ -737,9 +800,12 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
     fn return_values_and_implicit_nil() {
         check_script(r#"
             fun one() { return 1; }
+            
             fun nothing() { return; }
+            
             fun noReturn() {}
             print one(); // expect: 1
+            
             print nothing(); // expect: nil
             print noReturn(); // expect: nil
         "#);
@@ -775,6 +841,7 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
         check_script(r#"
             var a = "global";
             fun f() { { var a = "inner"; return a; } }
+            
             print f(); // expect: inner
             print a; // expect: global
         "#);
@@ -792,6 +859,7 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
                 return count;
             }
             var counter = makeCounter();
+           
             counter(); // expect: 1
             counter(); // expect: 2
         "#);
@@ -835,8 +903,10 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
             var a = "global";
             {
                 fun set() { a = "assigned"; }
+                
                 var a = "block";
                 set();
+                
                 print a; // expect: block
             }
             print a; // expect: assigned
@@ -885,9 +955,11 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
                 return count;
             }
             var a = makeCounter();
+            
             var b = makeCounter();
             a();
             a();
+            
             print a(); // expect: 3
             print b(); // expect: 1
         "#);
@@ -897,7 +969,9 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
     fn global_functions_can_use_globals_defined_later() {
         check_script(r#"
             fun show() { print later; }
+           
             var later = "defined after";
+           
             show(); // expect: defined after
         "#);
     }
@@ -1150,5 +1224,175 @@ fn run_then_eval(program: &str, expr: &str) -> Result<Value, RuntimeError> {
         assert_eq!(run_then_eval("class A {}", "A(1)").unwrap_err().message, "Expected 0 arguments but got 1.");
         assert_eq!(run_then_eval("class P { init(x) {} }", "P()").unwrap_err().message, "Expected 1 arguments but got 0.");
     }
+        #[test]
+    fn subclasses_inherit_methods() {
+        check_script(r#"
+            class Doughnut {
+                cook() {
+                    print "Fry until golden brown.";
+                }
+            }
+            class BostonCream < Doughnut {}
+            BostonCream().cook(); // expect: Fry until golden brown.
+        "#);
+    }
 
+    #[test]
+    fn super_calls_the_superclass_method() {
+        check_script(r#"
+            class Doughnut {
+                cook() {
+                    print "Fry until golden brown.";
+                }
+            }
+            
+            class BostonCream < Doughnut {
+                cook() {
+                    super.cook();
+                    print "Pipe full of custard and coat with chocolate.";
+                }
+            }
+            
+            BostonCream().cook();
+            // expect: Fry until golden brown.
+            // expect: Pipe full of custard and coat with chocolate.
+        "#);
+    }
+
+    #[test]
+    fn super_is_resolved_statically() {
+        //the book's A/B/C example 
+        check_script(r#"
+            class A {
+                method() { print "A method"; }
+            }
+            class B < A {
+                method() { print "B method"; }
+                test() { super.method(); }
+            }
+            class C < B {}
+            C().test(); // expect: A method
+        "#);
+    }
+
+    #[test]
+    fn subclass_methods_override() {
+        check_script(r#"
+            class A { m() { return "A"; } }
+            
+            class B < A { m() { return "B"; } }
+            
+            print B().m(); // expect: B
+            
+            print A().m(); // expect: A
+        "#);
+    }
+
+    #[test]
+    fn methods_are_found_through_a_long_chain() {
+        check_script(r#"
+            class A { a() { return "a"; } }
+            class B < A {}
+            class C < B {}
+            
+            print C().a(); // expect: a
+        "#);
+    }
+
+    #[test]
+    fn init_is_inherited() {
+        check_script(r#"
+            class A {
+                init(x) { this.x = x; }
+            }
+            
+            class B < A {}
+            
+            print B(3).x; // expect: 3
+        "#);
+    }
+
+    #[test]
+    fn subclass_init_can_call_super_init() {
+        check_script(r#"
+            class A {
+                init(x) { this.x = x; }
+            }
+            
+            class B < A {
+                init(x, y) {
+                    super.init(x);
+                    this.y = y;
+                }
+            }
+            
+            var b = B(1, 2);
+            
+            print b.x + b.y; // expect: 3
+        "#);
+    }
+
+    #[test]
+    fn super_methods_are_bound_to_this() {
+        check_script(r#"
+            class A {
+                name() { return this.n; }
+            }
+            
+            class B < A {
+                name() { return "B:" + super.name(); }
+            }
+            
+            var b = B();
+            
+            b.n = "x";
+            print b.name(); // expect: B:x
+        "#);
+    }
+
+    #[test]
+    fn super_method_can_be_stored_and_called_later() {
+        check_script(r#"
+            class A {
+                hi() { print "hi from A"; }
+            
+            }
+            
+            class B < A {
+                getHi() { return super.hi; }
+            }
+            
+            var f = B().getHi();
+            
+            f(); // expect: hi from A
+        "#);
+    }
+
+    #[test]
+    fn local_classes_can_inherit() {
+        check_script(r#"
+            {
+                class A { m() { return "local A"; } }
+            
+                class B < A { m() { return super.m(); } }
+            
+                print B().m(); // expect: local A
+            }
+        "#);
+    }
+
+    #[test]
+    fn superclass_must_be_a_class() {
+        let e = run_then_eval(
+            "var NotAClass = \"I am totally not a class\"; class Subclass < NotAClass {}",
+            "1",
+        ).unwrap_err();
+        assert_eq!(e.message, "Superclass must be a class.");
+    }
+
+    #[test]
+    fn undefined_super_method_is_an_error() {
+        let e = run_then_eval("class A {} class B < A { m() { return super.nope; } }", "B().m()").unwrap_err();
+        assert_eq!(e.message, "Undefined property 'nope'.");
+    }
 }

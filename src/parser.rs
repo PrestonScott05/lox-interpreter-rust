@@ -67,6 +67,14 @@ impl Parser {
 
     fn class_declaration(&mut self) -> Result<Stmt, ParseError> {
         let name = self.consume(TokenType::Identifier, "Expect class name.")?;
+
+        let superclass = if self.match_token(&[TokenType::Less]) {
+            let super_name = self.consume(TokenType::Identifier, "Expect superclass name.")?;
+
+            Some(Expression::Variable { id: next_id(), name: super_name })
+        } else {
+            None
+        };
         
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
         
@@ -78,7 +86,7 @@ impl Parser {
 
         self.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
 
-        Ok(Stmt::Class {name, methods})
+        Ok(Stmt::Class {name, superclass, methods})
     }
 
 
@@ -556,6 +564,19 @@ impl Parser {
             });
         }
 
+        if self.match_token(&[TokenType::Super]) {
+            let keyword = self.previous();
+            self.consume(TokenType::Dot, "Expect '.' after 'super'.")?;
+
+            let method = self.consume(TokenType::Identifier, "Expect superclass method name.")?;
+
+            return Ok(Expression::Super {
+                id: next_id(),
+                keyword,
+                method
+            });
+        }
+
         if self.match_token(&[TokenType::This]) {
             return Ok(Expression::This {
                 id: next_id(),
@@ -852,7 +873,7 @@ mod tests {
         let stmts = parse_program("class Breakfast { cook() { print 1; } serve(who) { print who; } }").unwrap();
         match stmts.as_slice() {
             
-            [Stmt::Class { name, methods }] => {
+            [Stmt::Class { name, methods , ..}] => {
                 
                 assert_eq!(name.lexeme, "Breakfast");
                 
@@ -911,4 +932,43 @@ mod tests {
         
         assert_eq!(parse_program("a.;").unwrap_err()[0].message, "Expect property name after '.'.");
     }
+
+        #[test]
+    fn parses_superclass() {
+        let stmts = parse_program("class BostonCream < Doughnut {}").unwrap();
+        
+        match stmts.as_slice() {
+        
+            [Stmt::Class { superclass: Some(Expression::Variable { name, .. }), .. }] => {
+                assert_eq!(name.lexeme, "Doughnut");
+        
+            }
+        
+            other => panic!("expected a class with a superclass, got {other:?}"),
+        }
+
+        
+        let stmts = parse_program("class A {}").unwrap();
+        
+        assert!(matches!(stmts.as_slice(), [Stmt::Class { superclass: None, .. }]));
+    }
+
+    #[test]
+    fn parses_super_calls() {
+        
+        assert_eq!(parse_to_string("super.cook"), "(super cook)");
+        
+        assert_eq!(parse_to_string("super.cook(1)"), "(call (super cook) 1)");
+    }
+
+    #[test]
+    fn super_syntax_errors() {
+        
+        assert_eq!(parse_program("class B < {}").unwrap_err()[0].message, "Expect superclass name.");
+        
+        assert_eq!(parse_program("super;").unwrap_err()[0].message, "Expect '.' after 'super'.");
+        
+        assert_eq!(parse_program("super.;").unwrap_err()[0].message, "Expect superclass method name.");
+    }
+
 }

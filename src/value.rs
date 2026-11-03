@@ -51,12 +51,17 @@ impl LoxFunction {
 
 pub struct LoxClass {
     pub name: String,
+    pub superclass: Option<Rc<LoxClass>>,
     pub methods: HashMap<String, Rc<LoxFunction>>,
 }
 
 impl LoxClass {
     pub fn find_method(&self, name: &str) -> Option<Rc<LoxFunction>> {
-        self.methods.get(name).cloned()
+        if let Some(method) = self.methods.get(name) {
+            return Some(Rc::clone(method));
+        }
+
+        self.superclass.as_ref().and_then(|superclass| superclass.find_method(name))
     }
 }
 
