@@ -30,7 +30,10 @@ All of Part II of the crafting interpreters book (Chapters 4-13) is complete. th
 **Pipeline:** source text → `Scanner` → tokens → `Parser` → `Expression` (AST) → `Interpreter` → `Value`
 
 ### Build
-cargo build
+Prerequisites: Rust **1.85 or newer** (the crate uses `edition = "2024"`; developed with Rust 1.87). Install Rust from https://rustup.rs. There are no other dependencies.
+
+from the project root: 
+    cargo build
 
 ### Run
 Run a Lox script file:
@@ -208,6 +211,12 @@ test interpreter::tests::recursion_fib ... ok
 
 test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
 
+### Limitations
+- Infinite recursion crashes the program
+- Memory for closures and instances that refer to themselves is never freed 
+- The book's optional end-of-chapter challenges are not implemented.
+- The interpreter has not been run against the book's official test suite; the tests here are based on the book's examples and error messages.
+
 ### Progress:
 - Chapter 4: Scanning - Completed
 - Chapter 5: Representing Code - Completed
@@ -218,6 +227,7 @@ test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fi
 - Chapter 10: Functions - Completed
 - Chapter 11: Resolving and Binding - Completedd
 - Chapter 12: Classes - Completed
-- Chaper 13: Inheritance - Completed
+- Chapter 13: Inheritance - Completed
+- JLOX: COMPLETE!!
 
 
